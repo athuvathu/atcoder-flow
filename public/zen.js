@@ -4,6 +4,7 @@
 
 import { audioEngine } from './audio.js';
 import { atcoderToCodeforces, getAtcoderMeta } from './rating.js';
+import { flowStore } from './store.js';
 
 function escapeHtml(str) {
   return (str || '')
@@ -79,18 +80,6 @@ export class ZenFlowHUD {
         saved_epoch: Math.floor(Date.now() / 1000)
       };
       localStorage.setItem('atcoder_flow_zen_state', JSON.stringify(stateObj));
-
-      // Asynchronous heartbeat to backend
-      fetch('/api/session/state', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          active_problem_id: this.currentProblem.id,
-          session_elapsed_seconds: this.elapsedSeconds,
-          session_paused: this.isPaused ? 1 : 0,
-          session_solves: this.sessionSolves
-        })
-      }).catch(() => {});
     } catch (_) {}
   }
 
@@ -106,19 +95,14 @@ export class ZenFlowHUD {
     this.statementData = null;
 
     // Asynchronously pre-fetch statement in background for instant reader opening
-    fetch(`/api/problems/${problem.id}/statement`)
-      .then(r => r.ok ? r.json() : null)
+    flowStore.fetchStatement(problem.id)
       .then(d => { if (d && d.statement_html) this.statementData = d; })
       .catch(() => {});
 
     // Fetch full problem details if needed
     if (!problem.url) {
-      try {
-        const res = await fetch(`/api/problems/${problem.id}`);
-        if (res.ok) {
-          this.currentProblem = await res.json();
-        }
-      } catch (_) {}
+      const p = flowStore.getProblem(problem.id);
+      if (p) this.currentProblem = p;
     }
 
     // Calibrate Par time
@@ -126,14 +110,9 @@ export class ZenFlowHUD {
     this.parSeconds = Math.min(2100, Math.max(480, Math.round(600 + (diff - 1000) * 1.5)));
 
     // Fetch user live training rating and streak
-    try {
-      const userRes = await fetch('/api/user/state');
-      if (userRes.ok) {
-        const user = await userRes.json();
-        this.trainingRating = user.training_rating || 1200;
-        this.streak = user.streak || 0;
-      }
-    } catch (_) {}
+    const user = flowStore.getUserState();
+    this.trainingRating = user.training_rating || 1200;
+    this.streak = user.streak || 0;
 
     // Reset stopwatch if opening a new problem
     const saved = localStorage.getItem('atcoder_flow_zen_state');
@@ -342,12 +321,7 @@ export class ZenFlowHUD {
     if (btn && !silent) btn.textContent = 'PUSHING...';
 
     try {
-      const res = await fetch('/api/cph/push', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ problem_id: this.currentProblem.id })
-      });
-      const data = await res.json();
+      const data = await flowStore.pushToCPH(this.currentProblem.id);
       if (data.delivered) {
         if (!silent && typeof audioEngine.playChime === 'function') audioEngine.playChime();
         this.showToast(`Pushed to CPH / Editor (port ${data.port})! Problem ready.`, 'info');
@@ -391,9 +365,7 @@ export class ZenFlowHUD {
         drawer.querySelector('#btn-close-reader').addEventListener('click', () => this.toggleReader());
 
         try {
-          const res = await fetch(`/api/problems/${this.currentProblem.id}/statement`);
-          const data = await res.json();
-          if (!res.ok) throw new Error(data.error || 'Failed to load statement');
+          const data = await flowStore.fetchStatement(this.currentProblem.id);
           this.statementData = data;
           this.renderReaderContent(drawer, data);
         } catch (err) {
@@ -580,9 +552,8 @@ export class ZenFlowHUD {
     audioEngine.playClick();
     this.showToast(`Switched mode to ${mode.toUpperCase()}. Fetching next problem...`, 'info');
     try {
-      const res = await fetch(`/api/flow/next?mode=${mode}`);
-      const prob = await res.json();
-      if (res.ok && prob && prob.id) {
+      const prob = flowStore.getNextFlowProblem(mode);
+      if (prob && prob.id) {
         this.loadProblem(prob);
       }
     } catch (_) {}
@@ -599,20 +570,8 @@ export class ZenFlowHUD {
     }
 
     try {
-      const res = await fetch('/api/compulsion/solve', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          problem_id: this.currentProblem.id,
-          elapsed_seconds: this.elapsedSeconds,
-          optimistic: Boolean(optimistic)
-        })
-      });
-
-      const data = await res.json();
-
       // Case 1: Already solved
-      if (res.status === 409 && data.already_solved) {
+      if (flowStore.isSolved(this.currentProblem.id)) {
         this.showToast('Problem already recorded as solved.', 'info');
         if (solveBtn) {
           solveBtn.disabled = false;
@@ -622,8 +581,20 @@ export class ZenFlowHUD {
         return;
       }
 
+      let isVerified = Boolean(optimistic);
+
+      // If verifying normally, check Kenkoooo
+      if (!optimistic) {
+        try {
+          const syncData = await flowStore.syncKenkoooo();
+          if (flowStore.isSolved(this.currentProblem.id) || (syncData.new_ac && syncData.new_ac.includes(this.currentProblem.id))) {
+            isVerified = true;
+          }
+        } catch (_) {}
+      }
+
       // Case 2: Kenkoooo API lag detected — allow immediate 1-key attestation
-      if (!optimistic && data.lag_possible) {
+      if (!isVerified) {
         if (solveBtn) {
           solveBtn.disabled = false;
           solveBtn.textContent = '[Enter] ATTEST AC';
@@ -633,16 +604,9 @@ export class ZenFlowHUD {
         return;
       }
 
-      if (!res.ok) {
-        this.showToast(`Error: ${data.error || 'Solve verification failed'}`, 'error');
-        if (solveBtn) {
-          solveBtn.disabled = false;
-          solveBtn.textContent = '[v] VERIFY AC';
-        }
-        return;
-      }
-
       // ===== JACKPOT: Verified or Attested AC =====
+      const data = flowStore.recordSolve(this.currentProblem.id, this.elapsedSeconds, optimistic);
+
       this.sessionSolves++;
       this.trainingRating = data.training_rating;
       this.streak = data.streak;
@@ -655,7 +619,7 @@ export class ZenFlowHUD {
       this.showJackpotCelebration(data);
 
     } catch (err) {
-      this.showToast(`Network error: ${err.message}`, 'error');
+      this.showToast(`Verification error: ${err.message}`, 'error');
       if (solveBtn) {
         solveBtn.disabled = false;
         solveBtn.textContent = '[v] VERIFY AC';
@@ -849,9 +813,8 @@ export class ZenFlowHUD {
     const modes = { 1: 'warmup', 2: 'flow', 3: 'boss' };
     const mode = modes[stageNum] || 'flow';
     try {
-      const res = await fetch(`/api/flow/next?mode=${mode}`);
-      if (res.ok) {
-        const prob = await res.json();
+      const prob = flowStore.getNextFlowProblem(mode);
+      if (prob && prob.id) {
         this.loadProblem(prob);
       } else {
         this.showToast('Could not load gauntlet stage problem.', 'error');
@@ -980,15 +943,7 @@ export class ZenFlowHUD {
   async handleSkip(reason = 'neutral') {
     audioEngine.playClick();
     try {
-      const res = await fetch('/api/compulsion/skip', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          problem_id: this.currentProblem.id,
-          reason
-        })
-      });
-      const data = await res.json();
+      const data = flowStore.recordSkip(this.currentProblem.id, reason);
       localStorage.removeItem('atcoder_flow_zen_state');
 
       if (data.primed_problem) {

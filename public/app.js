@@ -4,6 +4,7 @@ import { PracticeTable } from './table.js';
 import { ZenFlowHUD } from './zen.js';
 import { TechTreeVisualizer } from './tech_tree.js';
 import { atcoderToCodeforces, getAtcoderMeta } from './rating.js';
+import { flowStore } from './store.js';
 
 class AtCoderFlowApp {
   constructor() {
@@ -24,6 +25,7 @@ class AtCoderFlowApp {
   }
 
   async init() {
+    await flowStore.init();
     this.setupDOM();
     this.initControllers();
     this.attachGlobalKeynav();
@@ -237,18 +239,10 @@ class AtCoderFlowApp {
 
     const cleanHandle = newHandle.trim();
     try {
-      const res = await fetch('/api/user/handle', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ handle: cleanHandle })
-      });
-      const data = await res.json();
-      if (res.ok) {
-        this.userState = data;
-        this.updateHudDOM();
-        this.showToast(`Active handle switched to ${cleanHandle}. Syncing AtCoder history...`);
-        await this.syncKenkoooo();
-      }
+      this.userState = flowStore.setHandle(cleanHandle);
+      this.updateHudDOM();
+      this.showToast(`Active handle switched to ${cleanHandle}. Syncing AtCoder history...`);
+      await this.syncKenkoooo();
     } catch (err) {
       this.showToast(`Error switching handle: ${err.message}`);
     }
@@ -270,9 +264,8 @@ class AtCoderFlowApp {
     audioEngine.playClick();
     this.showToast(`Pulling ${mode.toUpperCase()} challenge reel...`);
     try {
-      const res = await fetch(`/api/flow/next?mode=${mode}`);
-      if (res.ok) {
-        const problem = await res.json();
+      const problem = flowStore.getNextFlowProblem(mode);
+      if (problem) {
         this.openZenMode(problem);
       } else {
         this.showToast('Could not fetch next problem. Check practice table.', 'error');
@@ -316,13 +309,10 @@ class AtCoderFlowApp {
       if (saved) {
         const parsed = JSON.parse(saved);
         if (parsed.problem_id) {
-          const res = await fetch(`/api/problems/${parsed.problem_id}`);
-          if (res.ok) {
-            const prob = await res.json();
-            if (!prob.is_solved) {
-              this.openZenMode(prob);
-              this.showToast(`Resumed active session for ${prob.title || prob.id} (${this.zen.formatTime(parsed.elapsed_seconds || 0)})`);
-            }
+          const prob = flowStore.getProblem(parsed.problem_id);
+          if (prob && !prob.is_solved) {
+            this.openZenMode(prob);
+            this.showToast(`Resumed active session for ${prob.title || prob.id} (${this.zen.formatTime(parsed.elapsed_seconds || 0)})`);
           }
         }
       }
@@ -349,20 +339,15 @@ class AtCoderFlowApp {
     this.showToast('Syncing with Kenkoooo API...');
 
     try {
-      const res = await fetch('/api/user/sync');
-      const data = await res.json();
-      if (res.ok) {
-        if (data.new_ac && data.new_ac.length > 0) {
-          audioEngine.playChime();
-          this.showToast(`Sync successful! ${data.new_ac.length} new AC solves recorded.`, 'ac-toast');
-        } else {
-          this.showToast(`Sync complete (${data.synced || 0} total AC submissions cached).`);
-        }
-        await this.fetchUserState();
-        await this.table.fetchProblems();
+      const data = await flowStore.syncKenkoooo();
+      if (data.new_ac && data.new_ac.length > 0) {
+        audioEngine.playChime();
+        this.showToast(`Sync successful! ${data.new_ac.length} new AC solves recorded.`, 'ac-toast');
       } else {
-        this.showToast(`Sync error: ${data.error || 'Server error'}`);
+        this.showToast(`Sync complete (${data.synced || 0} total AC submissions cached).`);
       }
+      this.fetchUserState();
+      this.table.renderTable();
     } catch (err) {
       this.showToast(`Sync failed: ${err.message}`);
     } finally {
@@ -372,11 +357,8 @@ class AtCoderFlowApp {
 
   async fetchUserState() {
     try {
-      const res = await fetch('/api/user/state');
-      if (res.ok) {
-        this.userState = await res.json();
-        this.updateHudDOM();
-      }
+      this.userState = flowStore.getUserState();
+      this.updateHudDOM();
     } catch (_) {}
   }
 
@@ -413,26 +395,19 @@ class AtCoderFlowApp {
 
   async fetchUserPreferences() {
     try {
-      const res = await fetch('/api/user/preferences');
-      if (res.ok) {
-        const prefs = await res.json();
-        if (typeof prefs.hide_difficulty === 'boolean') {
-          this.table.setHideDifficulty(prefs.hide_difficulty);
-        }
-        if (typeof prefs.muted === 'boolean' && prefs.muted) {
-          this.toggleMute();
-        }
+      const prefs = flowStore.getUserPreferences();
+      if (typeof prefs.hide_difficulty === 'boolean') {
+        this.table.setHideDifficulty(prefs.hide_difficulty);
+      }
+      if (typeof prefs.muted === 'boolean' && prefs.muted) {
+        this.toggleMute();
       }
     } catch (_) {}
   }
 
   async saveUserPreferences(prefs) {
     try {
-      await fetch('/api/user/preferences', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(prefs)
-      });
+      flowStore.saveUserPreferences(prefs);
     } catch (_) {}
   }
 

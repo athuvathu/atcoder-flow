@@ -1,5 +1,6 @@
 // Factorio-inspired Algorithmic Tech Tree DAG Visualizer
 // 25 nodes across 5 tiers with unlock thresholds, prerequisite curves, and bottleneck surfacing.
+import { flowStore } from './store.js';
 
 export class TechTreeVisualizer {
   constructor(containerEl, options = {}) {
@@ -44,9 +45,8 @@ export class TechTreeVisualizer {
    */
   async fetchTechTree() {
     try {
-      const res = await fetch('/api/tech-tree');
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      this.nodes = await res.json();
+      await flowStore.init();
+      this.nodes = flowStore.getTechTree();
       this.renderTree();
     } catch (err) {
       const grid = this.container.querySelector('#tree-nodes-grid');

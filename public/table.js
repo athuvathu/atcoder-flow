@@ -1,5 +1,6 @@
 // Monospace Practice Table & Filtering Controller
 // Renders the 5-column CSS grid table matching atcoder-categories aesthetic
+import { flowStore } from './store.js';
 
 export const RATING_BANDS = [
   { name: 'Gray', min: -Infinity, max: 399, hex: '#C0C0C0' },
@@ -238,9 +239,8 @@ export class PracticeTable {
    */
   async fetchProblems() {
     try {
-      const res = await fetch('/api/problems');
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      this.problems = await res.json();
+      await flowStore.init();
+      this.problems = flowStore.getProblems();
       this.applyFilters();
     } catch (err) {
       const container = this.container.querySelector('#table-rows-container');
