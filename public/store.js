@@ -252,25 +252,53 @@ class FlowStoreClass {
 
   /**
    * Records AC solve, computes Par pacing bonuses and Speed Surge dynamics.
+   * Calibrated with honest, deflated CP performance and Elo-principled rating delta.
    */
   recordSolve(problemId, elapsedSeconds, isAttested = true) {
     const problem = this.getProblem(problemId) || { id: problemId, clipped_difficulty: 1200 };
     const baseDiff = problem.clipped_difficulty || 1200;
 
     const parSeconds = Math.min(2100, Math.max(480, Math.round(600 + (baseDiff - 1000) * 1.5)));
-    const timeBonus = Math.max(-200, Math.min(250, Math.round((parSeconds - elapsedSeconds) / 4)));
+
+    // Pacing vs Par: measured speed adjustment anchored to difficulty
+    let speedBonus = 0;
+    if (elapsedSeconds <= parSeconds) {
+      // Ahead of par: up to +75 pts for solving significantly faster than par
+      speedBonus = Math.round(((parSeconds - elapsedSeconds) / parSeconds) * 75);
+    } else {
+      // Slower than par: realistic pacing penalty up to -120 pts
+      speedBonus = Math.max(-120, Math.round(((parSeconds - elapsedSeconds) / parSeconds) * 80));
+    }
 
     const isCritical = elapsedSeconds <= 0.5 * parSeconds;
+    // Speed Surge bonus for blistering execution: max +25 pts
     const speedSurgeBonus = isCritical
-      ? Math.min(300, Math.floor(((0.5 * parSeconds - elapsedSeconds) / (0.5 * parSeconds)) * 300))
+      ? Math.min(25, Math.floor(((0.5 * parSeconds - elapsedSeconds) / (0.5 * parSeconds)) * 25))
       : 0;
 
     const isClutch = !isCritical && (elapsedSeconds >= 0.85 * parSeconds && elapsedSeconds <= parSeconds);
 
-    const solvePerformance = Math.max(400, baseDiff + timeBonus + speedSurgeBonus);
+    // Honest solve performance anchored to problem difficulty
+    const solvePerformance = Math.max(400, Math.round(baseDiff + speedBonus + speedSurgeBonus));
     const cfPerf = atcoderToCodeforces(solvePerformance);
 
-    const ratingDelta = isCritical ? 35 : (elapsedSeconds <= parSeconds ? 25 : 15);
+    // Elo-principled Training Rating progression
+    const currentTr = this.userState.training_rating || 1200;
+    const expectedScore = 1 / (1 + Math.pow(10, (currentTr - baseDiff) / 400));
+    const baseDelta = Math.max(1, Math.round(16 * (1 - expectedScore)));
+
+    let speedDeltaBonus = 0;
+    if (isCritical) {
+      speedDeltaBonus = 4;
+    } else if (elapsedSeconds <= parSeconds) {
+      speedDeltaBonus = 1;
+    } else if (elapsedSeconds > 1.5 * parSeconds) {
+      speedDeltaBonus = -3;
+    } else {
+      speedDeltaBonus = -1;
+    }
+
+    const ratingDelta = Math.max(1, Math.min(22, baseDelta + speedDeltaBonus));
 
     // Update state
     this.userState.training_rating = Math.round(this.userState.training_rating + ratingDelta);

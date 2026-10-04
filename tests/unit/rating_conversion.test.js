@@ -4,15 +4,15 @@ import { atcoderToCodeforces, getAtcoderMeta, formatDualRatingHTML } from '../..
 
 describe('Unit: AtCoder to Codeforces Rating & Rank Conversion', () => {
   it('case 1: should correctly map benchmark anchors', () => {
-    assert.equal(atcoderToCodeforces(0).cfRating, 600);
-    assert.equal(atcoderToCodeforces(400).cfRating, 1050);
-    assert.equal(atcoderToCodeforces(800).cfRating, 1380);
-    assert.equal(atcoderToCodeforces(1200).cfRating, 1680);
-    assert.equal(atcoderToCodeforces(1600).cfRating, 1950);
-    assert.equal(atcoderToCodeforces(2000).cfRating, 2200);
-    assert.equal(atcoderToCodeforces(2400).cfRating, 2450);
-    assert.equal(atcoderToCodeforces(2800).cfRating, 2750);
-    assert.equal(atcoderToCodeforces(3200).cfRating, 3100);
+    assert.equal(atcoderToCodeforces(0).cfRating, 400);
+    assert.equal(atcoderToCodeforces(400).cfRating, 850);
+    assert.equal(atcoderToCodeforces(800).cfRating, 1200);
+    assert.equal(atcoderToCodeforces(1200).cfRating, 1500);
+    assert.equal(atcoderToCodeforces(1600).cfRating, 1800);
+    assert.equal(atcoderToCodeforces(2000).cfRating, 2050);
+    assert.equal(atcoderToCodeforces(2400).cfRating, 2300);
+    assert.equal(atcoderToCodeforces(2800).cfRating, 2600);
+    assert.equal(atcoderToCodeforces(3200).cfRating, 2900);
   });
 
   it('case 2: should interpolate strictly monotonically between anchors', () => {
@@ -25,40 +25,46 @@ describe('Unit: AtCoder to Codeforces Rating & Rank Conversion', () => {
   });
 
   it('case 3: should assign correct Codeforces titles and colors', () => {
-    // 600 -> Newbie
-    const r600 = atcoderToCodeforces(0);
-    assert.equal(r600.title, 'Newbie');
+    // 400 -> Newbie
+    const r0 = atcoderToCodeforces(0);
+    assert.equal(r0.title, 'Newbie');
 
-    // 1050 -> Newbie
-    const r1050 = atcoderToCodeforces(400);
-    assert.equal(r1050.title, 'Newbie');
+    // 850 -> Newbie
+    const r400 = atcoderToCodeforces(400);
+    assert.equal(r400.title, 'Newbie');
 
-    // 1380 -> Pupil
-    const r1380 = atcoderToCodeforces(800);
-    assert.equal(r1380.title, 'Pupil');
+    // 1200 -> Pupil
+    const r800 = atcoderToCodeforces(800);
+    assert.equal(r800.title, 'Pupil');
+    assert.equal(r800.color, '#5cb85c');
 
-    // 1680 -> Expert
-    const r1680 = atcoderToCodeforces(1200);
-    assert.equal(r1680.title, 'Expert');
-    assert.equal(r1680.color, '#4a90e2');
+    // 1500 -> Specialist
+    const r1200 = atcoderToCodeforces(1200);
+    assert.equal(r1200.title, 'Specialist');
+    assert.equal(r1200.color, '#00d2d3');
 
-    // 1950 -> Candidate Master
-    const r1950 = atcoderToCodeforces(1600);
-    assert.equal(r1950.title, 'Candidate Master');
-    assert.equal(r1950.color, '#ba55d3');
+    // 1800 -> Expert
+    const r1600 = atcoderToCodeforces(1600);
+    assert.equal(r1600.title, 'Expert');
+    assert.equal(r1600.color, '#4a90e2');
 
-    // 2200 -> Master
-    const r2200 = atcoderToCodeforces(2000);
-    assert.equal(r2200.title, 'Master');
+    // 2050 -> Candidate Master
+    const r2000 = atcoderToCodeforces(2000);
+    assert.equal(r2000.title, 'Candidate Master');
+    assert.equal(r2000.color, '#ba55d3');
 
-    // 2450 -> Grandmaster
-    const r2450 = atcoderToCodeforces(2400);
-    assert.equal(r2450.title, 'Grandmaster');
+    // 2300 -> International Master
+    const r2400 = atcoderToCodeforces(2400);
+    assert.equal(r2400.title, 'International Master');
+
+    // 2600 -> International Grandmaster
+    const r2800 = atcoderToCodeforces(2800);
+    assert.equal(r2800.title, 'International Grandmaster');
   });
 
   it('case 4: should format dual rating HTML string cleanly', () => {
     const html = formatDualRatingHTML(1200);
     assert.ok(html.includes('1200'), 'Should include AtCoder rating');
-    assert.ok(html.includes('CF 1680 [Expert]'), 'Should include CF rating and title');
+    assert.ok(html.includes('CF 1500 [Specialist]'), 'Should include CF rating and title');
   });
 });

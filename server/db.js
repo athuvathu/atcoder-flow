@@ -732,16 +732,23 @@ export function recordSolve(handle = 'atrv', problemId, elapsedSeconds = 0, isOp
   const parTime = calculateParTime(problem.clipped_difficulty);
   const user = getUserState(handle, db);
   const currentTr = user.training_rating || calculateUserBaselineRating(handle, db);
+  const diff = problem.clipped_difficulty || 1200;
 
-  let ratingDelta = 0;
-  if (elapsedSeconds > 0 && elapsedSeconds <= parTime * 0.6) {
-    ratingDelta = +25;
-  } else if (elapsedSeconds > 0 && elapsedSeconds <= parTime * 1.2) {
-    ratingDelta = +12;
+  const expectedScore = 1 / (1 + Math.pow(10, (currentTr - diff) / 400));
+  const baseDelta = Math.max(1, Math.round(16 * (1 - expectedScore)));
+
+  let speedDeltaBonus = 0;
+  if (elapsedSeconds > 0 && elapsedSeconds <= parTime * 0.5) {
+    speedDeltaBonus = 4;
+  } else if (elapsedSeconds > 0 && elapsedSeconds <= parTime) {
+    speedDeltaBonus = 1;
+  } else if (elapsedSeconds > parTime * 1.5) {
+    speedDeltaBonus = -3;
   } else {
-    ratingDelta = +5;
+    speedDeltaBonus = -1;
   }
 
+  const ratingDelta = Math.max(1, Math.min(22, baseDelta + speedDeltaBonus));
   const newTr = Math.max(400, Math.min(3200, currentTr + ratingDelta));
   const newStreak = user.streak + 1;
   const newMultiplier = Math.min(2.0, Math.round((user.multiplier + 0.15) * 100) / 100);

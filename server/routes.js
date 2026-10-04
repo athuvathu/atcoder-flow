@@ -300,18 +300,24 @@ export async function handleRequest(req, res) {
       const beatPar = elapsedSeconds <= parSeconds;
       const parDiff = parSeconds - elapsedSeconds;
 
-      // Solve performance score based on speed vs Par
+      // Solve performance score based on speed vs Par (honest, deflated)
       const baseDiff = problem.clipped_difficulty || 1200;
       const isCritical = elapsedSeconds > 0 && elapsedSeconds <= parSeconds * 0.5;
       const isClutch = !isCritical && elapsedSeconds >= parSeconds * 0.85 && elapsedSeconds <= parSeconds;
 
-      let speedSurgeBonus = 0;
-      if (isCritical) {
-        speedSurgeBonus = Math.round(((parSeconds - elapsedSeconds) / parSeconds) * 200);
+      let speedBonus = 0;
+      if (elapsedSeconds <= parSeconds) {
+        speedBonus = Math.round(((parSeconds - elapsedSeconds) / parSeconds) * 75);
+      } else {
+        speedBonus = Math.max(-120, Math.round(((parSeconds - elapsedSeconds) / parSeconds) * 80));
       }
 
-      const timeBonus = Math.round(Math.min(400, Math.max(-200, ((parSeconds - elapsedSeconds) / parSeconds) * 350)));
-      const solvePerformance = Math.max(400, baseDiff + timeBonus + speedSurgeBonus);
+      let speedSurgeBonus = 0;
+      if (isCritical) {
+        speedSurgeBonus = Math.min(25, Math.floor(((parSeconds * 0.5 - elapsedSeconds) / (parSeconds * 0.5)) * 25));
+      }
+
+      const solvePerformance = Math.max(400, Math.round(baseDiff + speedBonus + speedSurgeBonus));
 
       const cfPerf = atcoderToCodeforces(solvePerformance);
       const cfTr = atcoderToCodeforces(solveResult.training_rating);
@@ -325,7 +331,7 @@ export async function handleRequest(req, res) {
         cf_title: cfPerf.title,
         training_rating: solveResult.training_rating,
         cf_training_rating: cfTr.cfRating,
-        rating_delta: solveResult.rating_delta + (isCritical ? 10 : 0),
+        rating_delta: solveResult.rating_delta,
         par_seconds: parSeconds,
         elapsed_seconds: elapsedSeconds,
         beat_par: beatPar,
