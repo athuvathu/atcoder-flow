@@ -4,7 +4,7 @@ import { PracticeTable } from './table.js';
 import { ZenFlowHUD } from './zen.js';
 import { TechTreeVisualizer } from './tech_tree.js';
 import { atcoderToCodeforces, getAtcoderMeta } from './rating.js';
-import { flowStore } from './store.js';
+import { flowStore, CORE_DOMAINS } from './store.js';
 
 class AtCoderFlowApp {
   constructor() {
@@ -132,6 +132,17 @@ class AtCoderFlowApp {
         this.table.filterByCategory(node.category);
         this.switchView('table');
         this.showToast(`Filtered practice table to category: ${node.category}`);
+      },
+      onDomainDrill: (domainKey) => {
+        flowStore.setDomainFilter(domainKey);
+        this.startFlowSession('flow', { domainFilter: domainKey });
+      },
+      onDomainTable: (domainKey) => {
+        this.table.filterByDomain(domainKey);
+        this.switchView('table');
+        const domObj = CORE_DOMAINS.find(d => d.key === domainKey);
+        const name = domObj ? domObj.name : domainKey;
+        this.showToast(`Filtered practice table to domain: ${name}`);
       },
       onAudioClick: () => audioEngine.playClick()
     });
@@ -264,14 +275,16 @@ class AtCoderFlowApp {
   /**
    * Automatically picks the next problem in the flow channel and launches Zen Mode with reel spin.
    */
-  async startFlowSession(mode = 'flow') {
+  async startFlowSession(mode = 'flow', options = {}) {
     audioEngine.playClick();
     const offset = flowStore.getDiffOffset();
     const contest = flowStore.getContestFilter().toUpperCase();
     const bumpStr = offset !== 0 ? ` · Bump: ${offset > 0 ? '+' : ''}${offset}` : '';
-    this.showToast(`Pulling ${mode.toUpperCase()} challenge reel [${contest}${bumpStr}]...`);
+    const domainFilter = (options.domainFilter !== undefined) ? options.domainFilter : flowStore.getDomainFilter();
+    const domainStr = domainFilter ? ` · ${domainFilter.replace(/_/g, ' ').toUpperCase()}` : '';
+    this.showToast(`Pulling ${mode.toUpperCase()} challenge reel [${contest}${bumpStr}${domainStr}]...`);
     try {
-      const problem = flowStore.getNextFlowProblem(mode);
+      const problem = flowStore.getNextFlowProblem(mode, options);
       if (problem) {
         this.openZenMode(problem);
       } else {

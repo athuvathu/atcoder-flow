@@ -1,6 +1,4 @@
-// Monospace Practice Table & Filtering Controller
-// Renders the 5-column CSS grid table matching atcoder-categories aesthetic
-import { flowStore } from './store.js';
+import { flowStore, CORE_DOMAINS, classifyProblemDomain } from './store.js';
 
 export const RATING_BANDS = [
   { name: 'Gray', min: -Infinity, max: 399, hex: '#C0C0C0' },
@@ -51,6 +49,7 @@ export class PracticeTable {
     this.minDiff = 1000;
     this.maxDiff = 1500;
     this.categoryFilter = 'ALL';
+    this.domainFilter = 'ALL';
     this.searchQuery = '';
     this.unsolvedOnly = false;
     this.hideDifficulty = false;
@@ -91,6 +90,13 @@ export class PracticeTable {
             <span style="color:var(--text-muted)">–</span>
             <input type="number" id="max-diff-input" class="diff-input" value="${this.maxDiff}" step="50" min="0" max="4000" />
           </div>
+        </div>
+
+        <div class="filter-group" id="table-domain-chip-group" style="${this.domainFilter !== 'ALL' ? '' : 'display:none;'}">
+          <span class="active-domain-chip" id="table-active-domain-chip">
+            <span id="table-domain-chip-text">DOMAIN: ${this.domainFilter}</span>
+            <button class="btn-clear-domain" id="btn-clear-domain" title="Clear domain filter">×</button>
+          </span>
         </div>
 
         <div class="filter-group">
@@ -197,6 +203,17 @@ export class PracticeTable {
       });
     }
 
+    // Clear domain button
+    const clearDomainBtn = this.container.querySelector('#btn-clear-domain');
+    if (clearDomainBtn) {
+      clearDomainBtn.addEventListener('click', () => {
+        this.onAudioClick();
+        this.domainFilter = 'ALL';
+        this.applyFilters();
+        this.updateActiveDomainChip();
+      });
+    }
+
     // Row selection and button click delegation
     const rowsContainer = this.container.querySelector('#table-rows-container');
     if (rowsContainer) {
@@ -256,7 +273,35 @@ export class PracticeTable {
    */
   filterByCategory(category) {
     this.categoryFilter = category || 'ALL';
+    this.domainFilter = 'ALL';
+    this.updateActiveDomainChip();
     this.applyFilters();
+  }
+
+  /**
+   * Sets domain filter from external component (e.g. Core Domain card click).
+   * @param {string} domainKey
+   */
+  filterByDomain(domainKey) {
+    this.domainFilter = domainKey || 'ALL';
+    this.categoryFilter = 'ALL';
+    this.updateActiveDomainChip();
+    this.applyFilters();
+  }
+
+  updateActiveDomainChip() {
+    const group = this.container.querySelector('#table-domain-chip-group');
+    const textEl = this.container.querySelector('#table-domain-chip-text');
+    if (!group || !textEl) return;
+
+    if (this.domainFilter && this.domainFilter !== 'ALL') {
+      const d = CORE_DOMAINS.find(item => item.key === this.domainFilter);
+      const name = d ? d.name : this.domainFilter;
+      textEl.textContent = `DOMAIN: ${name.toUpperCase()}`;
+      group.style.display = 'inline-flex';
+    } else {
+      group.style.display = 'none';
+    }
   }
 
   /**
@@ -270,6 +315,11 @@ export class PracticeTable {
         if (this.contestFilter === 'ABC' && !c.startsWith('abc')) return false;
         if (this.contestFilter === 'ARC' && !c.startsWith('arc')) return false;
         if (this.contestFilter === 'AGC' && !c.startsWith('agc')) return false;
+      }
+
+      // Domain filter
+      if (this.domainFilter && this.domainFilter !== 'ALL') {
+        if (classifyProblemDomain(prob) !== this.domainFilter) return false;
       }
 
       // Difficulty range bounds

@@ -3,6 +3,179 @@
 
 import { atcoderToCodeforces } from './rating.js';
 
+export const CORE_DOMAINS = [
+  {
+    key: 'data_structures',
+    name: 'Data Structures',
+    icon: '⛁',
+    tagline: 'Segment Trees, BIT, DSU, Priority Queues & Range Queries',
+    nodeIds: ['prefix_sums', 'coord_compression', 'union_find', 'segment_tree', 'lazy_segtree', 'heavy_light_decomp']
+  },
+  {
+    key: 'probability',
+    name: 'Probability & Expectation',
+    icon: '🎲',
+    tagline: 'Linearity of Expectation, Expected Value DP, Random Variables',
+    nodeIds: ['math_basics', 'linear_dp']
+  },
+  {
+    key: 'dp',
+    name: 'Dynamic Programming',
+    icon: '⚡',
+    tagline: 'Linear DP, Knapsack, Tree DP, Bitmask & State Compression',
+    nodeIds: ['linear_dp', 'dp_knapsack', 'dp_trees', 'dp_bitmask']
+  },
+  {
+    key: 'graph',
+    name: 'Graph Theory & Flows',
+    icon: '🕸',
+    tagline: 'BFS/DFS, Dijkstra, Topological Sort, SCC, Max Flow & Min Cut',
+    nodeIds: ['bfs_dfs', 'dijkstra', 'topological_sort', 'scc_tarjan', 'flow_dinic', 'min_cost_flow']
+  },
+  {
+    key: 'math',
+    name: 'Math & Number Theory',
+    icon: '∑',
+    tagline: 'Divisibility, Modular Inverses, Combinatorics, Primes, FFT/NTT',
+    nodeIds: ['math_basics', 'modular_arithmetic', 'fft_convolution']
+  },
+  {
+    key: 'binary_search',
+    name: 'Binary Search & Two Pointers',
+    icon: '⇲',
+    tagline: 'Monotone Predicates, Sliding Window, Coordinate Compression, Meet-in-the-Middle',
+    nodeIds: ['two_pointers', 'binary_search', 'meet_in_middle']
+  },
+  {
+    key: 'greedy',
+    name: 'Greedy & Constructive',
+    icon: '⚔',
+    tagline: 'Greedy Invariants, Exchange Arguments, Ad-Hoc Logic, Games',
+    nodeIds: ['greedy_basics']
+  },
+  {
+    key: 'strings_geometry',
+    name: 'Strings, Geometry & Bitwise',
+    icon: '∡',
+    tagline: 'Suffix Automaton, String Hashing, Computational Geometry, Bitmasks',
+    nodeIds: ['bitwise_ops', 'suffix_automaton']
+  }
+];
+
+export const NODE_DOMAIN_MAP = {
+  math_basics: 'math',
+  prefix_sums: 'data_structures',
+  two_pointers: 'binary_search',
+  greedy_basics: 'greedy',
+  bitwise_ops: 'strings_geometry',
+  binary_search: 'binary_search',
+  bfs_dfs: 'graph',
+  coord_compression: 'binary_search',
+  modular_arithmetic: 'math',
+  linear_dp: 'dp',
+  dijkstra: 'graph',
+  topological_sort: 'graph',
+  dp_knapsack: 'dp',
+  dp_trees: 'dp',
+  union_find: 'data_structures',
+  segment_tree: 'data_structures',
+  scc_tarjan: 'graph',
+  meet_in_middle: 'binary_search',
+  dp_bitmask: 'dp',
+  flow_dinic: 'graph',
+  lazy_segtree: 'data_structures',
+  heavy_light_decomp: 'data_structures',
+  suffix_automaton: 'strings_geometry',
+  min_cost_flow: 'graph',
+  fft_convolution: 'math'
+};
+
+export function classifyProblemDomain(p) {
+  if (!p) return 'greedy';
+  const c = (p.category || '').toLowerCase();
+  const sc = (p.sub_category || '').toLowerCase();
+  const t = (p.title || '').toLowerCase();
+
+  // 1. Probability & Expectation (check first for high specificity)
+  if (
+    c === 'probability' ||
+    sc.includes('probability') ||
+    sc.includes('expectation') ||
+    t.includes('expected') ||
+    t.includes('expectation') ||
+    t.includes('probability')
+  ) {
+    return 'probability';
+  }
+
+  // 2. Data Structures
+  if (
+    c === 'range' || c === 'segment_tree' || c === 'prefix_sum' ||
+    sc.includes('segment') || sc.includes('fenwick') || sc.includes('heap') || 
+    sc.includes('disjoint') || sc.includes('dsu') || sc.includes('queue') || 
+    sc.includes('deque') || sc.includes('stack') || sc.includes('range') ||
+    t.includes('segment tree') || t.includes('fenwick')
+  ) {
+    return 'data_structures';
+  }
+
+  // 3. Dynamic Programming
+  if (
+    c === 'dp' ||
+    sc.includes('dp') ||
+    sc.includes('knapsack') ||
+    sc.includes('dynamic programming') ||
+    t.includes('dp') ||
+    t.includes('knapsack')
+  ) {
+    return 'dp';
+  }
+
+  // 4. Graph Theory & Flows
+  if (
+    c === 'graph' || c === 'dijkstra' || c === 'bfs_dfs' ||
+    sc.includes('bfs') || sc.includes('dfs') || sc.includes('shortest path') || 
+    sc.includes('tree') || sc.includes('spanning') || sc.includes('mst') || 
+    sc.includes('bridge') || sc.includes('matching') || sc.includes('flow') || 
+    sc.includes('topological') || sc.includes('tarjan')
+  ) {
+    return 'graph';
+  }
+
+  // 5. Binary Search & Two Pointers
+  if (
+    c === 'binary_search' || c === 'two_pointers' ||
+    sc.includes('binary search') || sc.includes('two pointers') || 
+    sc.includes('sliding window') || sc.includes('meet-in-the-middle') || 
+    sc.includes('coordinate compression')
+  ) {
+    return 'binary_search';
+  }
+
+  // 6. Math & Number Theory
+  if (
+    c === 'nt' || c === 'counting' ||
+    sc.includes('divisibility') || sc.includes('factorization') || 
+    sc.includes('modular') || sc.includes('combinatorics') || 
+    sc.includes('prime') || sc.includes('fft') || sc.includes('ntt') || 
+    sc.includes('generating function') || sc.includes('inclusion')
+  ) {
+    return 'math';
+  }
+
+  // 7. Strings, Geometry & Bitwise
+  if (
+    c === 'strings' || c === 'geometry' || c === 'bitwise' ||
+    sc.includes('string') || sc.includes('kmp') || sc.includes('suffix') || 
+    sc.includes('geometry') || sc.includes('bitwise') || sc.includes('bitmask')
+  ) {
+    return 'strings_geometry';
+  }
+
+  // 8. Greedy & Constructive ad-hoc
+  return 'greedy';
+}
+
 class FlowStoreClass {
   constructor() {
     this.problems = [];
@@ -134,6 +307,16 @@ class FlowStoreClass {
     return valid;
   }
 
+  getDomainFilter() {
+    return this.userState.preferences?.domain_filter || null;
+  }
+
+  setDomainFilter(domain = null) {
+    const val = (domain && domain !== 'ALL') ? domain : null;
+    this.saveUserPreferences({ domain_filter: val });
+    return val;
+  }
+
   isSolved(problemId) {
     return this.solvedSet.has(problemId);
   }
@@ -143,6 +326,10 @@ class FlowStoreClass {
       ...p,
       is_solved: this.isSolved(p.id)
     }));
+
+    if (filters.domain && filters.domain !== 'ALL') {
+      result = result.filter(p => classifyProblemDomain(p) === filters.domain);
+    }
 
     if (filters.category) {
       const cat = filters.category.toLowerCase();
@@ -190,10 +377,13 @@ class FlowStoreClass {
     }
 
     return this.techTreeNodes.map(node => {
+      const nodeId = node.node_id || node.id;
       const solved = solvedCounts[node.category] || 0;
       const total = node.total_problems || 50;
+      const parentDomain = NODE_DOMAIN_MAP[nodeId] || classifyProblemDomain({ category: node.category });
       return {
         ...node,
+        parent_domain: parentDomain,
         solved_count: solved,
         is_unlocked: true,
         mastery_percent: Math.min(100, Math.round((solved / Math.max(1, total)) * 100))
@@ -201,14 +391,44 @@ class FlowStoreClass {
     });
   }
 
+  getDomainSummary() {
+    const treeNodes = this.getTechTree();
+    const domainCounts = {};
+    const domainSolved = {};
+
+    for (const p of this.problems) {
+      const d = classifyProblemDomain(p);
+      domainCounts[d] = (domainCounts[d] || 0) + 1;
+      if (this.isSolved(p.id)) {
+        domainSolved[d] = (domainSolved[d] || 0) + 1;
+      }
+    }
+
+    return CORE_DOMAINS.map(domain => {
+      const total = domainCounts[domain.key] || 0;
+      const solved = domainSolved[domain.key] || 0;
+      const mastery = total > 0 ? Math.min(100, Math.round((solved / total) * 100)) : 0;
+      const childNodes = treeNodes.filter(n => (n.parent_domain || NODE_DOMAIN_MAP[n.node_id || n.id]) === domain.key);
+
+      return {
+        ...domain,
+        total_problems: total,
+        solved_count: solved,
+        mastery_percent: mastery,
+        nodes: childNodes
+      };
+    });
+  }
+
   /**
    * Only-Bangers Golden Era Problem Selection Engine (ABC 150+, ARC 100+, DP).
-   * Supports manual difficulty bump offset and contest filter (ALL, ABC, ARC).
+   * Supports manual difficulty bump offset, contest filter (ALL, ABC, ARC, AGC), and domain drill.
    */
   getNextFlowProblem(mode = 'flow', options = {}) {
     const rawTr = this.userState.training_rating || 1200;
     const diffOffset = (options.diffOffset !== undefined) ? options.diffOffset : this.getDiffOffset();
     const contestFilter = (options.contestFilter !== undefined) ? options.contestFilter.toLowerCase() : this.getContestFilter();
+    const domainFilter = (options.domainFilter !== undefined) ? options.domainFilter : this.getDomainFilter();
     const excludeId = options.excludeId || null;
 
     const tr = Math.max(400, rawTr + diffOffset);
@@ -265,7 +485,12 @@ class FlowStoreClass {
       return false;
     };
 
-    // Filter to Golden Era candidates matching bounds and contest
+    const matchesDomain = (prob) => {
+      if (!domainFilter || domainFilter === 'ALL') return true;
+      return classifyProblemDomain(prob) === domainFilter;
+    };
+
+    // Filter to Golden Era candidates matching bounds, contest, and domain
     let candidates = this.problems.filter(p => {
       if (this.isSolved(p.id)) return false;
       if (excludeId && p.id === excludeId) return false;
@@ -273,30 +498,39 @@ class FlowStoreClass {
       const diff = p.clipped_difficulty || 1200;
       if (diff < minDiff || diff > maxDiff) return false;
 
-      return matchesContest(p.contest_id);
+      return matchesContest(p.contest_id) && matchesDomain(p);
     });
 
-    // Graceful fallback 1: Expand difficulty bounds by +/- 150 within requested contest
+    // Graceful fallback 1: Expand difficulty bounds by +/- 150 within requested contest & domain
     if (candidates.length === 0) {
       candidates = this.problems.filter(p => {
         if (this.isSolved(p.id)) return false;
         if (excludeId && p.id === excludeId) return false;
         const diff = p.clipped_difficulty || 1200;
         if (diff < minDiff - 150 || diff > maxDiff + 150) return false;
-        return matchesContest(p.contest_id);
+        return matchesContest(p.contest_id) && matchesDomain(p);
       });
     }
 
-    // Graceful fallback 2: Any unsolved problem in requested contest
+    // Graceful fallback 2: Any unsolved problem in requested contest & domain
     if (candidates.length === 0) {
       candidates = this.problems.filter(p => {
         if (this.isSolved(p.id)) return false;
         if (excludeId && p.id === excludeId) return false;
-        return matchesContest(p.contest_id);
+        return matchesContest(p.contest_id) && matchesDomain(p);
       });
     }
 
-    // Ultimate fallback if entire requested contest is exhausted
+    // Graceful fallback 3: Any unsolved problem in domain across all contests
+    if (candidates.length === 0 && domainFilter && domainFilter !== 'ALL') {
+      candidates = this.problems.filter(p => {
+        if (this.isSolved(p.id)) return false;
+        if (excludeId && p.id === excludeId) return false;
+        return matchesDomain(p);
+      });
+    }
+
+    // Ultimate fallback if entire requested contest/domain is exhausted
     if (candidates.length === 0) {
       const fallback = this.problems.filter(p => !this.isSolved(p.id) && (!excludeId || p.id !== excludeId));
       if (fallback.length === 0) return this.problems[0];

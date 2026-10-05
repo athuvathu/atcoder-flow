@@ -1,5 +1,5 @@
-// Factorio-inspired Algorithmic Tech Tree DAG Visualizer
-// 25 nodes across 5 tiers with unlock thresholds, prerequisite curves, and bottleneck surfacing.
+// Factorio-inspired Algorithmic Tech Tree DAG Visualizer & Core Domains
+// 8 Core Pillars + 25-node micro DAG across 5 tiers with unlock thresholds and targeted drills.
 import { flowStore } from './store.js';
 
 export class TechTreeVisualizer {
@@ -7,8 +7,11 @@ export class TechTreeVisualizer {
     this.container = containerEl;
     this.options = options;
     this.nodes = [];
+    this.viewMode = localStorage.getItem('atcoder_tree_view') || 'domains'; // 'domains' | 'dag'
     this.onNodeClick = options.onNodeClick || (() => {});
     this.onAudioClick = options.onAudioClick || (() => {});
+    this.onDomainDrill = options.onDomainDrill || (() => {});
+    this.onDomainTable = options.onDomainTable || (() => {});
   }
 
   /**
@@ -20,24 +23,97 @@ export class TechTreeVisualizer {
   }
 
   /**
-   * Renders the base wrapper container.
+   * Renders the base wrapper container with mode toggles and views.
    */
   renderSkeleton() {
+    const isDomain = this.viewMode === 'domains';
     this.container.innerHTML = `
       <div class="tech-tree-wrapper">
         <div class="tree-header">
-          <div class="tree-title">FACTORIO ALGORITHMIC TECH TREE</div>
-          <div class="tree-subtitle">
-            Compounding skill DAG across 5 tiers. Master prerequisites to unlock higher-level algorithmic branches.
+          <div class="tree-header-top">
+            <div>
+              <div class="tree-title" id="tree-view-title">${isDomain ? 'CORE DOMAIN ARCHITECTURE' : 'FACTORIO ALGORITHMIC TECH TREE'}</div>
+              <div class="tree-subtitle" id="tree-view-subtitle">
+                ${isDomain
+                  ? 'Canonical Competitive Programming pillars with live mastery, problem density, and targeted flow drilling.'
+                  : 'Compounding skill DAG across 5 tiers. Master prerequisites to unlock higher-level algorithmic branches.'}
+              </div>
+            </div>
+            <div class="tree-mode-toggle" id="tree-mode-toggle">
+              <button class="btn-tree-mode ${isDomain ? 'active' : ''}" data-mode="domains" id="toggle-domains-btn">
+                <span class="mode-icon">▥</span> CORE DOMAINS
+              </button>
+              <button class="btn-tree-mode ${!isDomain ? 'active' : ''}" data-mode="dag" id="toggle-dag-btn">
+                <span class="mode-icon">☊</span> SKILL DAG (FACTORIO)
+              </button>
+            </div>
           </div>
         </div>
 
-        <div class="tree-container" id="tree-canvas-container">
+        <div class="domain-view-container" id="domain-view-container" style="${isDomain ? '' : 'display:none;'}">
+          <div class="domain-card-grid" id="domain-card-grid"></div>
+        </div>
+
+        <div class="tree-container" id="tree-canvas-container" style="${!isDomain ? '' : 'display:none;'}">
           <svg class="tree-svg-canvas" id="tree-svg-edges"></svg>
           <div class="tree-nodes-layer" id="tree-nodes-grid"></div>
         </div>
       </div>
     `;
+
+    // Attach view mode toggle buttons
+    const domBtn = this.container.querySelector('#toggle-domains-btn');
+    const dagBtn = this.container.querySelector('#toggle-dag-btn');
+
+    if (domBtn) {
+      domBtn.addEventListener('click', () => {
+        this.onAudioClick();
+        this.switchViewMode('domains');
+      });
+    }
+
+    if (dagBtn) {
+      dagBtn.addEventListener('click', () => {
+        this.onAudioClick();
+        this.switchViewMode('dag');
+      });
+    }
+  }
+
+  /**
+   * Switches between Core Domains grid view and Factorio Skill DAG view.
+   */
+  switchViewMode(mode) {
+    if (this.viewMode === mode) return;
+    this.viewMode = mode;
+    try {
+      localStorage.setItem('atcoder_tree_view', mode);
+    } catch (_) {}
+
+    const titleEl = this.container.querySelector('#tree-view-title');
+    const subEl = this.container.querySelector('#tree-view-subtitle');
+    const domContainer = this.container.querySelector('#domain-view-container');
+    const dagContainer = this.container.querySelector('#tree-canvas-container');
+    const domBtn = this.container.querySelector('#toggle-domains-btn');
+    const dagBtn = this.container.querySelector('#toggle-dag-btn');
+
+    const isDomain = mode === 'domains';
+    if (domBtn) domBtn.classList.toggle('active', isDomain);
+    if (dagBtn) dagBtn.classList.toggle('active', !isDomain);
+
+    if (isDomain) {
+      if (titleEl) titleEl.textContent = 'CORE DOMAIN ARCHITECTURE';
+      if (subEl) subEl.textContent = 'Canonical Competitive Programming pillars with live mastery, problem density, and targeted flow drilling.';
+      if (domContainer) domContainer.style.display = '';
+      if (dagContainer) dagContainer.style.display = 'none';
+      this.renderDomainView();
+    } else {
+      if (titleEl) titleEl.textContent = 'FACTORIO ALGORITHMIC TECH TREE';
+      if (subEl) subEl.textContent = 'Compounding skill DAG across 5 tiers. Master prerequisites to unlock higher-level algorithmic branches.';
+      if (domContainer) domContainer.style.display = 'none';
+      if (dagContainer) dagContainer.style.display = '';
+      this.renderTree();
+    }
   }
 
   /**
@@ -47,13 +123,97 @@ export class TechTreeVisualizer {
     try {
       await flowStore.init();
       this.nodes = flowStore.getTechTree();
-      this.renderTree();
+      if (this.viewMode === 'domains') {
+        this.renderDomainView();
+      } else {
+        this.renderTree();
+      }
     } catch (err) {
       const grid = this.container.querySelector('#tree-nodes-grid');
-      if (grid) {
-        grid.innerHTML = `<div style="padding:24px; color:var(--accent-red);">Failed to load Tech Tree: ${err.message}</div>`;
-      }
+      const dGrid = this.container.querySelector('#domain-card-grid');
+      const errHtml = `<div style="padding:24px; color:var(--accent-red);">Failed to load Tech Tree: ${err.message}</div>`;
+      if (grid) grid.innerHTML = errHtml;
+      if (dGrid) dGrid.innerHTML = errHtml;
     }
+  }
+
+  /**
+   * Renders the 8 Canonical Core Domains overview grid.
+   */
+  renderDomainView() {
+    const grid = this.container.querySelector('#domain-card-grid');
+    if (!grid) return;
+
+    const domains = flowStore.getDomainSummary();
+    const activeDomainFilter = flowStore.getDomainFilter();
+
+    grid.innerHTML = domains.map(d => {
+      const isDrilling = activeDomainFilter === d.key;
+
+      const nodeTags = (d.nodes || []).map(n => {
+        const solved = n.solved_count || 0;
+        const target = n.unlock_threshold || 4;
+        return `<span class="domain-node-pill" title="${n.title}: ${solved}/${target} solves">${n.title}</span>`;
+      }).join('');
+
+      return `
+        <div class="domain-card ${isDrilling ? 'active-drill' : ''}" data-domain="${d.key}">
+          <div class="domain-card-header">
+            <div class="domain-title-group">
+              <span class="domain-icon">${d.icon}</span>
+              <div class="domain-title-text">
+                <div class="domain-name">${d.name}</div>
+                <div class="domain-meta-sub">${d.solved_count} / ${d.total_problems} Solved (${d.mastery_percent}% Mastery)</div>
+              </div>
+            </div>
+            ${isDrilling ? '<span class="domain-drilling-pill">ACTIVE DRILL</span>' : ''}
+          </div>
+
+          <div class="domain-tagline">${d.tagline}</div>
+
+          <div class="domain-progress-track">
+            <div class="domain-progress-fill" style="width: ${d.mastery_percent}%;"></div>
+          </div>
+
+          <div class="domain-nodes-row">
+            <div class="domain-nodes-label">SKILL BRANCHES:</div>
+            <div class="domain-nodes-pills">${nodeTags || '<span class="domain-node-pill">Ad-Hoc / Fundamental</span>'}</div>
+          </div>
+
+          <div class="domain-card-actions">
+            <button class="btn-domain-action btn-drill-domain" data-domain="${d.key}">
+              ⚡ Drill Flow [${d.name.split(' ')[0]}]
+            </button>
+            <button class="btn-domain-action btn-table-domain" data-domain="${d.key}">
+              ☰ View Problems (${d.total_problems})
+            </button>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    // Attach click events on action buttons
+    grid.querySelectorAll('.btn-drill-domain').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.onAudioClick();
+        const domainKey = btn.dataset.domain;
+        if (this.onDomainDrill) {
+          this.onDomainDrill(domainKey);
+        }
+      });
+    });
+
+    grid.querySelectorAll('.btn-table-domain').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.onAudioClick();
+        const domainKey = btn.dataset.domain;
+        if (this.onDomainTable) {
+          this.onDomainTable(domainKey);
+        }
+      });
+    });
   }
 
   /**
@@ -103,6 +263,7 @@ export class TechTreeVisualizer {
                    data-node-id="${nodeId}"
                    data-category="${node.category || ''}"
                    data-status="${status}">
+                <div class="node-domain-badge">${(node.parent_domain || '').replace(/_/g, ' ').toUpperCase()}</div>
                 <div class="node-title">${node.title}</div>
                 <div class="node-meta">
                   <span>${currentSolves} / ${targetSolves} solves</span>
