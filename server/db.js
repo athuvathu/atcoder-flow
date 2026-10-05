@@ -657,10 +657,10 @@ export function getNextRecommendedProblem(handle = 'atrv', mode = 'flow', catego
 
   const candidates = db.prepare(sql).all(...params);
   if (candidates.length > 0) {
-    // Quality Filter: Prioritize modern Golden Era tasks (ABC 150+, ARC 100+, Educational DP)
+    // Quality Filter: Prioritize modern Golden Era tasks (ABC 150+, ARC 100+, AGC, Educational DP)
     const isModernBanger = (c) => {
       const cid = (c.contest_id || '').toLowerCase();
-      if (cid === 'dp') return true;
+      if (cid === 'dp' || cid.startsWith('agc')) return true;
       if (cid.startsWith('abc')) {
         const num = parseInt(cid.slice(3), 10);
         return !isNaN(num) && num >= 150;

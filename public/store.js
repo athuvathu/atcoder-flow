@@ -127,7 +127,7 @@ class FlowStoreClass {
   }
 
   setContestFilter(type = 'all') {
-    const valid = ['all', 'abc', 'arc'].includes((type || '').toLowerCase())
+    const valid = ['all', 'abc', 'arc', 'agc'].includes((type || '').toLowerCase())
       ? type.toLowerCase()
       : 'all';
     this.saveUserPreferences({ contest_filter: valid });
@@ -249,8 +249,11 @@ class FlowStoreClass {
         const num = parseInt(c.slice(3), 10);
         return c.startsWith('arc') && !isNaN(num) && num >= 100;
       }
-      // 'all' includes modern ABC, modern ARC, and Educational DP
-      if (c === 'dp') return true;
+      if (contestFilter === 'agc') {
+        return c.startsWith('agc');
+      }
+      // 'all' includes modern ABC, modern ARC, AGC, and Educational DP
+      if (c === 'dp' || c.startsWith('agc')) return true;
       if (c.startsWith('abc')) {
         const num = parseInt(c.slice(3), 10);
         return !isNaN(num) && num >= 150;

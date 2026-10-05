@@ -635,11 +635,11 @@ export class ZenFlowHUD {
   }
 
   /**
-   * Cycles contest filter: ALL -> ABC -> ARC -> ALL.
+   * Cycles contest filter: ALL -> ABC -> ARC -> AGC -> ALL.
    */
   cycleContestFilter() {
     const current = flowStore.getContestFilter();
-    const order = ['all', 'abc', 'arc'];
+    const order = ['all', 'abc', 'arc', 'agc'];
     const nextIdx = (order.indexOf(current) + 1) % order.length;
     this.setContestFilter(order[nextIdx]);
   }
@@ -1144,9 +1144,10 @@ export class ZenFlowHUD {
           <span class="mode-sep">|</span>
           <span class="mode-label">CONTEST:</span>
           <div class="contest-btn-group-zen">
-            <button class="btn-contest-opt ${contestFilter === 'all' ? 'active' : ''}" data-contest="all" title="All Golden Era (ABC 150+, ARC 100+, DP) [x]">ALL</button>
+            <button class="btn-contest-opt ${contestFilter === 'all' ? 'active' : ''}" data-contest="all" title="All Golden Era (ABC 150+, ARC 100+, AGC, DP) [x]">ALL</button>
             <button class="btn-contest-opt ${contestFilter === 'abc' ? 'active' : ''}" data-contest="abc" title="ABC Only (ABC 150+) [x]">ABC</button>
             <button class="btn-contest-opt ${contestFilter === 'arc' ? 'active' : ''}" data-contest="arc" title="ARC Only (ARC 100+) [x]">ARC</button>
+            <button class="btn-contest-opt ${contestFilter === 'agc' ? 'active' : ''}" data-contest="agc" title="AGC Only (AtCoder Grand Contest) [x]">AGC</button>
           </div>
           <span class="mode-sep">|</span>
           <span class="mode-label">BUMP:</span>
