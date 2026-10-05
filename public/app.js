@@ -262,7 +262,10 @@ class AtCoderFlowApp {
    */
   async startFlowSession(mode = 'flow') {
     audioEngine.playClick();
-    this.showToast(`Pulling ${mode.toUpperCase()} challenge reel...`);
+    const offset = flowStore.getDiffOffset();
+    const contest = flowStore.getContestFilter().toUpperCase();
+    const bumpStr = offset !== 0 ? ` · Bump: ${offset > 0 ? '+' : ''}${offset}` : '';
+    this.showToast(`Pulling ${mode.toUpperCase()} challenge reel [${contest}${bumpStr}]...`);
     try {
       const problem = flowStore.getNextFlowProblem(mode);
       if (problem) {

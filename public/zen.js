@@ -560,6 +560,92 @@ export class ZenFlowHUD {
   }
 
   /**
+   * Manually bumps target difficulty offset up or down in Flow or Gauntlet.
+   */
+  bumpDifficulty(delta) {
+    if (delta !== 0) audioEngine.playClick();
+    const newOffset = delta === 0 ? flowStore.setDiffOffset(0) : flowStore.bumpDiffOffset(delta);
+
+    // Update bump display in DOM
+    const badge = this.container.querySelector('#zen-bump-val');
+    if (badge) {
+      badge.textContent = newOffset > 0 ? `+${newOffset}` : newOffset;
+      badge.className = `bump-val-pill ${newOffset > 0 ? 'bump-pos' : newOffset < 0 ? 'bump-neg' : ''}`;
+    }
+    const metaPill = this.container.querySelector('#zen-active-bump-pill');
+    if (metaPill) {
+      if (newOffset !== 0) {
+        metaPill.textContent = `${newOffset > 0 ? '+' : ''}${newOffset} BUMP`;
+        metaPill.className = `diff-bump-pill ${newOffset > 0 ? 'bump-pos' : 'bump-neg'}`;
+        metaPill.style.display = 'inline-flex';
+      } else {
+        metaPill.style.display = 'none';
+      }
+    }
+
+    const effTr = Math.round(this.trainingRating + newOffset);
+    if (this.elapsedSeconds === 0) {
+      // Stopwatch has not started yet, seamlessly roll reel to new target!
+      if (this.gauntletState && this.gauntletState.active) {
+        this.fetchGauntletStage(this.gauntletState.stage);
+        this.showToast(`Difficulty bump: ${newOffset > 0 ? '+' : ''}${newOffset} (Target: ~${effTr}). Pulled new Gauntlet stage!`);
+      } else {
+        const prob = flowStore.getNextFlowProblem(this.activeMode, { excludeId: this.currentProblem?.id });
+        if (prob) {
+          this.loadProblem(prob);
+          this.showToast(`Difficulty bump: ${newOffset > 0 ? '+' : ''}${newOffset} (Target: ~${effTr}). Pulled new problem!`);
+        }
+      }
+    } else {
+      this.showToast(`Difficulty bump: ${newOffset > 0 ? '+' : ''}${newOffset} (Target: ~${effTr}). Applies to next problem [s to skip].`);
+    }
+  }
+
+  /**
+   * Sets contest filter: 'all', 'abc', or 'arc'.
+   */
+  setContestFilter(contest) {
+    audioEngine.playClick();
+    const newFilter = flowStore.setContestFilter(contest);
+
+    // Update toggle buttons in DOM
+    this.container.querySelectorAll('.btn-contest-opt').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.contest === newFilter);
+    });
+
+    const contestPill = this.container.querySelector('#zen-active-contest-pill');
+    if (contestPill) {
+      contestPill.textContent = newFilter.toUpperCase();
+    }
+
+    if (this.elapsedSeconds === 0) {
+      if (this.gauntletState && this.gauntletState.active) {
+        this.fetchGauntletStage(this.gauntletState.stage);
+        this.showToast(`Contest filter: ${newFilter.toUpperCase()}. Pulled new Gauntlet stage!`);
+      } else {
+        const prob = flowStore.getNextFlowProblem(this.activeMode, { excludeId: this.currentProblem?.id });
+        if (prob) {
+          this.loadProblem(prob);
+          this.showToast(`Contest filter: ${newFilter.toUpperCase()}. Pulled new problem!`);
+        }
+      }
+    } else {
+      this.showToast(`Contest filter: ${newFilter.toUpperCase()}. Applies to next problem [s to skip].`);
+    }
+  }
+
+  /**
+   * Cycles contest filter: ALL -> ABC -> ARC -> ALL.
+   */
+  cycleContestFilter() {
+    const current = flowStore.getContestFilter();
+    const order = ['all', 'abc', 'arc'];
+    const nextIdx = (order.indexOf(current) + 1) % order.length;
+    this.setContestFilter(order[nextIdx]);
+  }
+
+
+  /**
    * Handles problem solve with instant AC check and optimistic attestation.
    */
   async handleSolve(optimistic = false) {
@@ -802,7 +888,10 @@ export class ZenFlowHUD {
       startTime: Date.now()
     };
     audioEngine.playChime();
-    this.showToast('Starting 3-Problem Flow Gauntlet: Stage 1 [Warmup]...', 'info');
+    const offset = flowStore.getDiffOffset();
+    const contest = flowStore.getContestFilter().toUpperCase();
+    const offsetStr = offset !== 0 ? ` · Bump: ${offset > 0 ? '+' : ''}${offset}` : '';
+    this.showToast(`Starting 3-Problem Flow Gauntlet [Stage 1 Warmup] · Contest: ${contest}${offsetStr}...`, 'info');
     this.fetchGauntletStage(1);
   }
 
@@ -988,6 +1077,8 @@ export class ZenFlowHUD {
 
     const cfMeta = atcoderToCodeforces(this.trainingRating);
     const atMeta = getAtcoderMeta(this.trainingRating);
+    const diffOffset = flowStore.getDiffOffset();
+    const contestFilter = flowStore.getContestFilter();
 
     this.container.innerHTML = `
       <div class="zen-wrapper">
@@ -1019,6 +1110,8 @@ export class ZenFlowHUD {
             </div>
             <div class="task-meta-pills">
               <span id="zen-slot-diff" class="diff-badge">DIFF: ${prob.clipped_difficulty || 'N/A'}</span>
+              <span id="zen-active-contest-pill" class="contest-badge-pill">${contestFilter.toUpperCase()}</span>
+              ${diffOffset !== 0 ? `<span id="zen-active-bump-pill" class="diff-bump-pill ${diffOffset > 0 ? 'bump-pos' : 'bump-neg'}">${diffOffset > 0 ? '+' : ''}${diffOffset} BUMP</span>` : `<span id="zen-active-bump-pill" class="diff-bump-pill" style="display:none;"></span>`}
               <span id="zen-topic-tag" class="topic-badge">TOPIC: [HIDDEN // 't']</span>
               <span class="rating-badge">PERF: <strong style="color:${atMeta.color};">${this.trainingRating}</strong> <span style="color:${cfMeta.color}; margin-left:4px;">[CF ${cfMeta.cfRating} ${cfMeta.title}]</span></span>
             </div>
@@ -1042,12 +1135,26 @@ export class ZenFlowHUD {
           </div>
         </header>
 
-        <!-- Training Intensity Mode Selector -->
+        <!-- Training Intensity & Scope Selector -->
         <div class="zen-mode-selector">
           <span class="mode-label">INTENSITY:</span>
           <button class="btn-mode ${this.activeMode === 'speed' ? 'active' : ''}" data-mode="speed" title="Fast fluency drills (-200)">[1] Speed</button>
           <button class="btn-mode ${this.activeMode === 'flow' ? 'active' : ''}" data-mode="flow" title="Optimal challenge at Par rating">[2] Flow</button>
           <button class="btn-mode ${this.activeMode === 'reach' ? 'active' : ''}" data-mode="reach" title="Growth breakthrough challenge (+150)">[3] Reach</button>
+          <span class="mode-sep">|</span>
+          <span class="mode-label">CONTEST:</span>
+          <div class="contest-btn-group-zen">
+            <button class="btn-contest-opt ${contestFilter === 'all' ? 'active' : ''}" data-contest="all" title="All Golden Era (ABC 150+, ARC 100+, DP) [x]">ALL</button>
+            <button class="btn-contest-opt ${contestFilter === 'abc' ? 'active' : ''}" data-contest="abc" title="ABC Only (ABC 150+) [x]">ABC</button>
+            <button class="btn-contest-opt ${contestFilter === 'arc' ? 'active' : ''}" data-contest="arc" title="ARC Only (ARC 100+) [x]">ARC</button>
+          </div>
+          <span class="mode-sep">|</span>
+          <span class="mode-label">BUMP:</span>
+          <div class="bump-control-cluster">
+            <button id="btn-bump-down" class="btn-bump-btn" title="Decrease difficulty target by 50 [-]">-50</button>
+            <span id="zen-bump-val" class="bump-val-pill ${diffOffset > 0 ? 'bump-pos' : diffOffset < 0 ? 'bump-neg' : ''}" title="Difficulty target offset. Click or press [0] to reset">${diffOffset > 0 ? '+' : ''}${diffOffset}</span>
+            <button id="btn-bump-up" class="btn-bump-btn" title="Increase difficulty target by 50 [= or +]">+50</button>
+          </div>
           <span class="mode-sep">|</span>
           <button id="btn-zen-gauntlet" class="btn-mode-gauntlet ${this.gauntletState && this.gauntletState.active ? 'active' : ''}" title="Launch structured 3-problem Gauntlet Run [g]">[g] Gauntlet Run (3-Stage)</button>
         </div>
@@ -1115,6 +1222,8 @@ export class ZenFlowHUD {
               <span class="key-pill">r</span> Reader
               <span class="key-pill">n</span> Notes
               <span class="key-pill">g</span> Gauntlet
+              <span class="key-pill">+/-</span> Bump Diff
+              <span class="key-pill">x</span> Contest
               <span class="key-pill">Space</span> Pause
               <span class="key-pill">o</span> AtCoder
               <span class="key-pill">v</span> Verify AC
@@ -1144,6 +1253,28 @@ export class ZenFlowHUD {
         if (mode) this.setPracticeMode(mode);
       });
     });
+
+    // Contest filter buttons
+    this.container.querySelectorAll('.btn-contest-opt').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        const contest = e.target.dataset.contest;
+        if (contest) this.setContestFilter(contest);
+      });
+    });
+
+    // Difficulty bump controls
+    const btnBumpDown = this.container.querySelector('#btn-bump-down');
+    if (btnBumpDown) {
+      btnBumpDown.addEventListener('click', () => this.bumpDifficulty(-50));
+    }
+    const btnBumpUp = this.container.querySelector('#btn-bump-up');
+    if (btnBumpUp) {
+      btnBumpUp.addEventListener('click', () => this.bumpDifficulty(50));
+    }
+    const bumpValBadge = this.container.querySelector('#zen-bump-val');
+    if (bumpValBadge) {
+      bumpValBadge.addEventListener('click', () => this.bumpDifficulty(0));
+    }
 
     // Gauntlet run button
     const btnGauntlet = this.container.querySelector('#btn-zen-gauntlet');
@@ -1317,6 +1448,18 @@ export class ZenFlowHUD {
     } else if (key === 'e') {
       e.preventDefault();
       this.openEditorial();
+    } else if (key === '+' || key === '=' || key === ']') {
+      e.preventDefault();
+      this.bumpDifficulty(50);
+    } else if (key === '-' || key === '_' || key === '[') {
+      e.preventDefault();
+      this.bumpDifficulty(-50);
+    } else if (key === '0') {
+      e.preventDefault();
+      this.bumpDifficulty(0);
+    } else if (key === 'x' || key === 'X') {
+      e.preventDefault();
+      this.cycleContestFilter();
     } else if (key === 's') {
       e.preventDefault();
       this.handleSkip('neutral');

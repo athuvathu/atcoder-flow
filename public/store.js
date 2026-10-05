@@ -108,6 +108,32 @@ class FlowStoreClass {
     return this.userState.preferences || {};
   }
 
+  getDiffOffset() {
+    return Number(this.userState.preferences?.diff_offset) || 0;
+  }
+
+  setDiffOffset(offset) {
+    const num = Math.max(-800, Math.min(1200, Number(offset) || 0));
+    this.saveUserPreferences({ diff_offset: num });
+    return num;
+  }
+
+  bumpDiffOffset(step = 50) {
+    return this.setDiffOffset(this.getDiffOffset() + step);
+  }
+
+  getContestFilter() {
+    return (this.userState.preferences?.contest_filter || 'all').toLowerCase();
+  }
+
+  setContestFilter(type = 'all') {
+    const valid = ['all', 'abc', 'arc'].includes((type || '').toLowerCase())
+      ? type.toLowerCase()
+      : 'all';
+    this.saveUserPreferences({ contest_filter: valid });
+    return valid;
+  }
+
   isSolved(problemId) {
     return this.solvedSet.has(problemId);
   }
@@ -177,9 +203,15 @@ class FlowStoreClass {
 
   /**
    * Only-Bangers Golden Era Problem Selection Engine (ABC 150+, ARC 100+, DP).
+   * Supports manual difficulty bump offset and contest filter (ALL, ABC, ARC).
    */
-  getNextFlowProblem(mode = 'flow') {
-    const tr = this.userState.training_rating || 1200;
+  getNextFlowProblem(mode = 'flow', options = {}) {
+    const rawTr = this.userState.training_rating || 1200;
+    const diffOffset = (options.diffOffset !== undefined) ? options.diffOffset : this.getDiffOffset();
+    const contestFilter = (options.contestFilter !== undefined) ? options.contestFilter.toLowerCase() : this.getContestFilter();
+    const excludeId = options.excludeId || null;
+
+    const tr = Math.max(400, rawTr + diffOffset);
 
     let minDiff, maxDiff;
     switch (mode) {
@@ -206,32 +238,64 @@ class FlowStoreClass {
         break;
     }
 
-    // Filter to Golden Era candidates
-    const candidates = this.problems.filter(p => {
+    // Matcher for contest type and Golden Era standards
+    const matchesContest = (contestId) => {
+      const c = (contestId || '').toLowerCase();
+      if (contestFilter === 'abc') {
+        const num = parseInt(c.slice(3), 10);
+        return c.startsWith('abc') && !isNaN(num) && num >= 150;
+      }
+      if (contestFilter === 'arc') {
+        const num = parseInt(c.slice(3), 10);
+        return c.startsWith('arc') && !isNaN(num) && num >= 100;
+      }
+      // 'all' includes modern ABC, modern ARC, and Educational DP
+      if (c === 'dp') return true;
+      if (c.startsWith('abc')) {
+        const num = parseInt(c.slice(3), 10);
+        return !isNaN(num) && num >= 150;
+      }
+      if (c.startsWith('arc')) {
+        const num = parseInt(c.slice(3), 10);
+        return !isNaN(num) && num >= 100;
+      }
+      return false;
+    };
+
+    // Filter to Golden Era candidates matching bounds and contest
+    let candidates = this.problems.filter(p => {
       if (this.isSolved(p.id)) return false;
+      if (excludeId && p.id === excludeId) return false;
 
       const diff = p.clipped_difficulty || 1200;
       if (diff < minDiff || diff > maxDiff) return false;
 
-      const contest = (p.contest_id || '').toLowerCase();
-      if (contest === 'dp') return true;
-
-      if (contest.startsWith('abc')) {
-        const num = parseInt(contest.slice(3), 10);
-        return !isNaN(num) && num >= 150;
-      }
-
-      if (contest.startsWith('arc')) {
-        const num = parseInt(contest.slice(3), 10);
-        return !isNaN(num) && num >= 100;
-      }
-
-      return false;
+      return matchesContest(p.contest_id);
     });
 
+    // Graceful fallback 1: Expand difficulty bounds by +/- 150 within requested contest
     if (candidates.length === 0) {
-      // Fallback: relax boundaries slightly if pool depleted
-      const fallback = this.problems.filter(p => !this.isSolved(p.id));
+      candidates = this.problems.filter(p => {
+        if (this.isSolved(p.id)) return false;
+        if (excludeId && p.id === excludeId) return false;
+        const diff = p.clipped_difficulty || 1200;
+        if (diff < minDiff - 150 || diff > maxDiff + 150) return false;
+        return matchesContest(p.contest_id);
+      });
+    }
+
+    // Graceful fallback 2: Any unsolved problem in requested contest
+    if (candidates.length === 0) {
+      candidates = this.problems.filter(p => {
+        if (this.isSolved(p.id)) return false;
+        if (excludeId && p.id === excludeId) return false;
+        return matchesContest(p.contest_id);
+      });
+    }
+
+    // Ultimate fallback if entire requested contest is exhausted
+    if (candidates.length === 0) {
+      const fallback = this.problems.filter(p => !this.isSolved(p.id) && (!excludeId || p.id !== excludeId));
       if (fallback.length === 0) return this.problems[0];
       return fallback[Math.floor(Math.random() * Math.min(10, fallback.length))];
     }
