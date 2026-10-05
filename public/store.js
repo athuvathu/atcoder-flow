@@ -431,6 +431,44 @@ class FlowStoreClass {
   }
 
   /**
+   * Records a problem surrender / give-up: resets streak, recalibrates rating honestly,
+   * tags problem for spaced repetition review, and primes next flow problem.
+   */
+  recordGiveUp(problemId, elapsedSeconds = 0) {
+    const currentTr = this.userState.training_rating || 1200;
+    const delta = -20;
+    const newTr = Math.max(400, Math.min(3200, currentTr + delta));
+
+    this.userState.training_rating = newTr;
+    this.userState.streak = 0;
+    this.userState.multiplier = 1.0;
+
+    // Track in review list for spaced repetition
+    if (!Array.isArray(this.userState.review_list)) {
+      this.userState.review_list = [];
+    }
+    if (problemId && !this.userState.review_list.includes(problemId)) {
+      this.userState.review_list.push(problemId);
+    }
+
+    this.saveToLocalStorage();
+
+    const nextProblem = this.getNextFlowProblem('flow');
+    return {
+      status: 'given_up',
+      reason: 'surrendered',
+      problem_id: problemId,
+      previous_tr: currentTr,
+      new_tr: newTr,
+      delta,
+      streak: 0,
+      multiplier: 1.0,
+      elapsed_seconds: elapsedSeconds,
+      primed_problem: nextProblem
+    };
+  }
+
+  /**
    * Directly syncs accepted submissions from Kenkoooo API (supports CORS out-of-the-box).
    */
   async syncKenkoooo() {

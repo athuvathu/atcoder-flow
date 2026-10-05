@@ -2496,3 +2496,124 @@ body.hide-difficulty .zen-problem-title {
   color: #ffffff;
 }
 
+/* ===== Give Up / Surrender Workflow (Unixporn) ===== */
+
+.btn-giveup {
+  color: var(--accent-amber);
+  border-color: rgba(255, 184, 54, 0.3);
+}
+
+.btn-giveup:hover {
+  background: rgba(255, 184, 54, 0.12);
+  border-color: var(--accent-amber);
+  color: #fff;
+}
+
+.giveup-card {
+  border-color: rgba(255, 184, 54, 0.35);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.85);
+}
+
+.giveup-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.giveup-verdict {
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  color: var(--accent-amber);
+  text-transform: uppercase;
+}
+
+.giveup-badge {
+  font-size: 11px;
+  padding: 2px 8px;
+  background: rgba(255, 184, 54, 0.12);
+  border: 1px solid rgba(255, 184, 54, 0.35);
+  color: var(--accent-amber);
+  border-radius: 4px;
+  font-family: var(--font-mono);
+}
+
+.gauntlet-failed-banner {
+  padding: 8px 12px;
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  color: #f87171;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  border-radius: 4px;
+  margin-bottom: 14px;
+  text-align: center;
+}
+
+.giveup-impact-box {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  padding: 12px 16px;
+  margin: 16px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+}
+
+.giveup-impact-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  color: var(--text-muted);
+}
+
+.giveup-impact-row strong.delta-neg {
+  color: #f87171;
+  font-weight: 700;
+}
+
+.giveup-impact-row strong.streak-reset {
+  color: var(--accent-amber);
+  font-weight: 700;
+}
+
+.giveup-editorial-cluster {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.editorial-hint-text {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+
+.btn-giveup-editorial {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 9px 16px;
+  background: #12151e;
+  border: 1px solid var(--accent-cyan);
+  color: var(--accent-cyan);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 4px;
+  text-decoration: none;
+  transition: all 0.15s ease;
+}
+
+.btn-giveup-editorial:hover {
+  background: var(--accent-cyan);
+  color: #08080a;
+}
+
+

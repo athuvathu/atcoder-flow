@@ -120,6 +120,10 @@ class AtCoderFlowApp {
         this.fetchUserState();
         this.table.fetchProblems();
       },
+      onGiveUp: (data) => {
+        this.fetchUserState();
+        this.table.fetchProblems();
+      },
       onExit: () => this.switchView('table')
     });
 

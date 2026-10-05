@@ -485,6 +485,38 @@ function createHttpServer(db) {
         });
       }
 
+      // 10b. POST /api/compulsion/giveup
+      if (pathname === '/api/compulsion/giveup' && req.method === 'POST') {
+        const problemId = parsedBody.problem_id;
+        if (!problemId) {
+          return sendJson(400, { error: 'Missing problem_id' });
+        }
+
+        db.prepare(`
+          UPDATE user_state
+          SET streak = 0,
+              multiplier = 1.0
+          WHERE handle = 'atrv'
+        `).run();
+
+        const nextProb = db.prepare(`
+          SELECT id FROM problems
+          WHERE is_solved = 0 AND difficulty BETWEEN 1000 AND 1500
+          ORDER BY difficulty ASC
+          LIMIT 1
+        `).get();
+
+        const primedId = nextProb ? nextProb.id : 'abc326_e';
+        return sendJson(200, {
+          status: 'given_up',
+          problem_id: problemId,
+          streak: 0,
+          multiplier: 1.0,
+          delta: -20,
+          primed_problem: { id: primedId }
+        });
+      }
+
       // Static files fallback
       const publicPath = path.join(PROJECT_ROOT, 'public', pathname === '/' ? 'index.html' : pathname);
       if (fs.existsSync(publicPath) && fs.statSync(publicPath).isFile()) {

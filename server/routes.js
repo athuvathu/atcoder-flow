@@ -16,6 +16,7 @@ import {
   getNextRecommendedProblem,
   recordSolve,
   recordSkip,
+  recordGiveUp,
   saveProblemScrapedDetails
 } from './db.js';
 import { syncUserSubmissions, checkProblemSubmission } from './sync.js';
@@ -360,6 +361,21 @@ export async function handleRequest(req, res) {
 
       const skipResult = recordSkip(handle, problemId, reason);
       return sendJson(res, 200, skipResult);
+    }
+
+    // 6b. POST /api/compulsion/giveup
+    if (method === 'POST' && pathname === '/api/compulsion/giveup') {
+      const body = await parseJsonBody(req).catch(() => ({}));
+      const problemId = body.problem_id;
+      const handle = body.handle || 'atrv';
+      const elapsed = parseInt(body.elapsed_seconds, 10) || 0;
+
+      if (!problemId) {
+        return sendJson(res, 400, { error: 'Missing problem_id' });
+      }
+
+      const giveUpResult = recordGiveUp(handle, problemId, elapsed);
+      return sendJson(res, 200, giveUpResult);
     }
 
     // 7. POST /api/session/state (Persists stopwatch and pause state)

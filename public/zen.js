@@ -42,6 +42,7 @@ export class ZenFlowHUD {
     // Callbacks
     this.onExit = options.onExit || (() => {});
     this.onSolveAC = options.onSolveAC || (() => {});
+    this.onGiveUp = options.onGiveUp || (() => {});
 
     this.restoreSession();
   }
@@ -1049,6 +1050,137 @@ export class ZenFlowHUD {
   }
 
   /**
+   * Prompts user to confirm giving up, pauses clock, reveals solution/editorial,
+   * recalibrates rating honestly, and records defeat.
+   */
+  handleGiveUp() {
+    if (this.container.querySelector('.zen-giveup-overlay')) return;
+
+    audioEngine.playHeavyThud();
+    this.stopTimer();
+
+    const prob = this.currentProblem || {};
+    const editorialUrl = prob.editorial_url || `https://atcoder.jp/contests/${prob.contest_id}/editorial`;
+    const isGauntlet = Boolean(this.gauntletState && this.gauntletState.active);
+
+    const overlay = document.createElement('div');
+    overlay.className = 'zen-jackpot-overlay zen-giveup-overlay';
+
+    overlay.innerHTML = `
+      <div class="jackpot-card giveup-card">
+        <div class="giveup-header">
+          <div class="giveup-verdict">[ SURRENDER // GAVE UP ]</div>
+          <span class="giveup-badge">TIME: ${this.formatTime(this.elapsedSeconds)}</span>
+        </div>
+
+        ${isGauntlet ? `<div class="gauntlet-failed-banner">[ GAUNTLET RUN FAILED AT STAGE ${this.gauntletState.stage}/3 ]</div>` : ''}
+
+        <div class="jackpot-task">${prob.title || prob.id}</div>
+
+        <div class="task-meta-pills" style="margin: 12px 0;">
+          <span class="diff-badge">DIFF: ${prob.clipped_difficulty || 'N/A'}</span>
+          <span class="topic-badge topic-revealed" style="color:var(--accent-amber); border:1px solid rgba(255,184,54,0.4);">
+            TOPIC: ${prob.category || 'General Problem Solving'}
+          </span>
+        </div>
+
+        <div class="giveup-impact-box">
+          <div class="giveup-impact-row">
+            <span>RATING ADJUSTMENT:</span>
+            <strong class="delta-neg">-20 TR</strong>
+          </div>
+          <div class="giveup-impact-row">
+            <span>SESSION STREAK:</span>
+            <strong class="streak-reset">RESET TO 0 AC</strong>
+          </div>
+          <div class="giveup-impact-row">
+            <span>SPACED REPETITION:</span>
+            <span style="color:var(--text-secondary)">QUEUED FOR REVIEW</span>
+          </div>
+        </div>
+
+        <div class="giveup-editorial-cluster">
+          <div class="editorial-hint-text">Study the approach before continuing:</div>
+          <a href="${editorialUrl}" target="_blank" rel="noopener noreferrer" class="btn-giveup-editorial" id="btn-giveup-open-ed">
+            [e] Read Official Editorial
+          </a>
+        </div>
+
+        <div class="jackpot-action-btns" style="margin-top:20px;">
+          <button id="btn-giveup-confirm" class="btn-jackpot-launch">
+            ${isGauntlet ? '[Enter] Terminate Gauntlet' : '[Enter] Confirm & Load Next Problem'}
+          </button>
+          <button id="btn-giveup-cancel" class="btn-jackpot-ghost">
+            [Esc] Resume Attempt
+          </button>
+        </div>
+      </div>
+    `;
+
+    this.container.appendChild(overlay);
+
+    const confirmBtn = overlay.querySelector('#btn-giveup-confirm');
+    const cancelBtn = overlay.querySelector('#btn-giveup-cancel');
+
+    if (confirmBtn) {
+      confirmBtn.focus();
+      confirmBtn.addEventListener('click', () => {
+        overlay.remove();
+        this.executeGiveUp();
+      });
+    }
+
+    if (cancelBtn) {
+      cancelBtn.addEventListener('click', () => {
+        overlay.remove();
+        this.startTimer();
+      });
+    }
+  }
+
+  /**
+   * Finalizes giving up, records state, updates rating, and transitions to next problem.
+   */
+  async executeGiveUp() {
+    audioEngine.playHeavyThud();
+    const isGauntlet = Boolean(this.gauntletState && this.gauntletState.active);
+
+    try {
+      const data = flowStore.recordGiveUp(this.currentProblem?.id, this.elapsedSeconds);
+      localStorage.removeItem('atcoder_flow_zen_state');
+
+      this.trainingRating = data.new_tr;
+      this.streak = 0;
+      this.sessionSolves = 0;
+
+      if (typeof this.onGiveUp === 'function') {
+        this.onGiveUp(data);
+      }
+
+      if (isGauntlet) {
+        this.gauntletState = { active: false, stage: 1, solves: [] };
+        this.showToast('Gauntlet run terminated. Problem queued for future review.', 'info');
+        this.destroy();
+        this.onExit();
+        return;
+      }
+
+      this.showToast(`Gave up on problem. TR: ${data.new_tr} (-20). Loading next challenge...`, 'info');
+
+      if (data.primed_problem) {
+        this.loadProblem(data.primed_problem);
+      } else {
+        this.destroy();
+        this.onExit();
+      }
+    } catch (err) {
+      this.showToast(`Error: ${err.message}`, 'error');
+      this.destroy();
+      this.onExit();
+    }
+  }
+
+  /**
    * Shows a minimal toast message.
    */
   showToast(msg, type = 'info') {
@@ -1190,6 +1322,9 @@ export class ZenFlowHUD {
             <button id="btn-zen-editorial" class="btn-action-ghost" title="Open official editorial [e]">
               [e] EDITORIAL
             </button>
+            <button id="btn-zen-giveup" class="btn-action-ghost btn-giveup" title="Surrender problem, reveal solution & record defeat [q]">
+              [q] GIVE UP
+            </button>
             <button id="btn-zen-skip" class="btn-action-ghost" title="Skip to next problem [s]">
               [s] SKIP
             </button>
@@ -1231,6 +1366,7 @@ export class ZenFlowHUD {
               <span class="key-pill">Enter</span> Attest AC
               <span class="key-pill">t</span> Reveal Topic
               <span class="key-pill">e</span> Editorial
+              <span class="key-pill">q</span> Give Up
               <span class="key-pill">1-3</span> Mode
               <span class="key-pill">s</span> Skip
               <span class="key-pill">Esc</span> Table
@@ -1343,6 +1479,12 @@ export class ZenFlowHUD {
       btnEd.addEventListener('click', () => this.openEditorial());
     }
 
+    // Give up
+    const btnGiveUp = this.container.querySelector('#btn-zen-giveup');
+    if (btnGiveUp) {
+      btnGiveUp.addEventListener('click', () => this.handleGiveUp());
+    }
+
     // Skip
     const btnSkip = this.container.querySelector('#btn-zen-skip');
     if (btnSkip) {
@@ -1413,6 +1555,29 @@ export class ZenFlowHUD {
       return;
     }
 
+    // Check if giveup modal is open
+    const giveupConfirmBtn = this.container.querySelector('#btn-giveup-confirm');
+    const giveupCancelBtn = this.container.querySelector('#btn-giveup-cancel');
+    const giveupEdBtn = this.container.querySelector('#btn-giveup-open-ed');
+    if (giveupConfirmBtn) {
+      if (key === 'Enter') {
+        e.preventDefault();
+        giveupConfirmBtn.click();
+        return;
+      }
+      if (key === 'Escape' && giveupCancelBtn) {
+        e.preventDefault();
+        giveupCancelBtn.click();
+        return;
+      }
+      if (key === 'e' && giveupEdBtn) {
+        e.preventDefault();
+        giveupEdBtn.click();
+        return;
+      }
+      return;
+    }
+
     if (key === ' ' || key === 'p') {
       e.preventDefault();
       this.togglePause();
@@ -1461,6 +1626,9 @@ export class ZenFlowHUD {
     } else if (key === 'x' || key === 'X') {
       e.preventDefault();
       this.cycleContestFilter();
+    } else if (key === 'q' || key === 'Q') {
+      e.preventDefault();
+      this.handleGiveUp();
     } else if (key === 's') {
       e.preventDefault();
       this.handleSkip('neutral');

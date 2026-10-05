@@ -817,6 +817,41 @@ export function recordSkip(handle = 'atrv', problemId, reason = 'neutral', db = 
 }
 
 /**
+ * Records giving up on a problem: resets streak, recalibrates rating honestly,
+ * and primes next recommended flow problem.
+ */
+export function recordGiveUp(handle = 'atrv', problemId, elapsedSeconds = 0, db = getDb()) {
+  const user = getUserState(handle, db);
+  const currentTr = user.training_rating || calculateUserBaselineRating(handle, db);
+  const delta = -20;
+  const newTr = Math.max(400, Math.min(3200, currentTr + delta));
+  const nextProblem = getNextRecommendedProblem(handle, 'flow', null, db);
+
+  updateUserState(handle, {
+    training_rating: newTr,
+    streak: 0,
+    multiplier: 1.0,
+    active_problem_id: nextProblem?.id || null,
+    session_elapsed_seconds: 0,
+    session_paused: 0
+  }, db);
+
+  return {
+    status: 'given_up',
+    reason: 'surrendered',
+    problem_id: problemId,
+    previous_tr: currentTr,
+    new_tr: newTr,
+    delta,
+    streak: 0,
+    multiplier: 1.0,
+    elapsed_seconds: elapsedSeconds,
+    primed_problem: nextProblem
+  };
+}
+
+
+/**
  * Returns user preferences.
  */
 export function getUserPreferences(handle = 'atrv', db = getDb()) {

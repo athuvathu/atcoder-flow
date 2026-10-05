@@ -67,4 +67,29 @@ describe('Integration: POST /api/compulsion/solve (Zero-Downtime Priming & Strea
     assert(state.streak > 14);
     assert(state.multiplier > 1.35);
   });
+
+  it('case 6: should record giveup, reset streak to 0, multiplier to 1.0, and recalibrate TR', async () => {
+    const res = await fetch(`${baseUrl}/api/compulsion/giveup`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ problem_id: 'arc110_c', elapsed_seconds: 600 })
+    });
+    assert.equal(res.status, 200);
+    const json = await res.json();
+    assert.equal(json.status, 'given_up');
+    assert.equal(json.streak, 0);
+    assert.equal(json.multiplier, 1.0);
+    assert.equal(json.delta, -20);
+    assert(json.primed_problem, 'Must prime next flow problem upon surrender');
+  });
+
+  it('case 7: should reject giveup with missing problem_id with HTTP 400', async () => {
+    const res = await fetch(`${baseUrl}/api/compulsion/giveup`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({})
+    });
+    assert.equal(res.status, 400);
+  });
 });
+
