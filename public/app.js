@@ -135,6 +135,7 @@ class AtCoderFlowApp {
               <h4>PROBLEM WORKBENCH & STOPWATCH</h4>
               <div class="shortcut-row"><kbd>Space</kbd> / <kbd>p</kbd> <span>Pause / Resume Stopwatch Timer</span></div>
               <div class="shortcut-row"><kbd>z</kbd> <span>Reset Stopwatch Timer to 00:00</span></div>
+              <div class="shortcut-row"><kbd>w</kbd> <span>End active practice session & stop timer</span></div>
               <div class="shortcut-row"><kbd>r</kbd> <span>Toggle Problem Statement & Sample Cases</span></div>
               <div class="shortcut-row"><kbd>n</kbd> <span>Toggle Side-by-Side Split Scratchpad</span></div>
               <div class="shortcut-row"><kbd>v</kbd> <span>Verify AC via AtCoder / Kenkoooo API</span></div>
@@ -664,8 +665,8 @@ class AtCoderFlowApp {
         <button id="btn-dock-resume" class="btn-dock-open" title="Return to Problem Workbench">
           ⚡ Open Workspace →
         </button>
-        <button id="btn-dock-close" class="btn-dock-end" title="End and clear active problem session">
-          ×
+        <button id="btn-dock-close" class="btn-dock-end" title="End and clear active problem session [w]">
+          ⏹ End Session
         </button>
       </div>
     `;
@@ -687,7 +688,7 @@ class AtCoderFlowApp {
       audioEngine.playClick();
       dock.dataset.probId = '';
       this.zen.endSession();
-      this.showToast('Active problem session closed.');
+      this.showToast('Practice session ended.');
     });
   }
 

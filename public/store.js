@@ -761,23 +761,47 @@ class FlowStoreClass {
   }
 
   /**
-   * Directly syncs accepted submissions from Kenkoooo API (supports CORS out-of-the-box).
+   * Fetches submissions from Kenkoooo v3 API with CloudFront cache-busting and CORS fallback.
+   */
+  async _fetchKenkooooSubmissions(handle, fromSecond) {
+    const url = `https://kenkoooo.com/atcoder/atcoder-api/v3/user/submissions?user=${encodeURIComponent(handle)}&from_second=${fromSecond}`;
+    try {
+      const res = await fetch(url, { cache: 'no-store' });
+      if (!res.ok) {
+        throw new Error(`Kenkoooo HTTP ${res.status}: ${res.statusText}`);
+      }
+      const data = await res.json();
+      return Array.isArray(data) ? data : [];
+    } catch (directErr) {
+      // Fallback to CORS proxy if direct CloudFront edge fails
+      const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
+      const res = await fetch(proxyUrl, { cache: 'no-store' });
+      if (!res.ok) throw directErr;
+      const data = await res.json();
+      return Array.isArray(data) ? data : [];
+    }
+  }
+
+  /**
+   * Directly syncs accepted submissions from Kenkoooo API.
+   * Queries both baseline history and a fresh 30-day rolling window (with jitter to bypass
+   * CloudFront edge caching and Kenkoooo's 500-submission ascending pagination cap).
    */
   async syncKenkoooo() {
-    const handle = this.userState.handle || 'atrv';
-    const url = `https://kenkoooo.com/atcoder/atcoder-api/v3/user/submissions?user=${encodeURIComponent(handle)}&from_second=0`;
+    const handle = (this.userState.handle || 'atrv').trim();
+    const nowSec = Math.floor(Date.now() / 1000);
+    // Unique from_second bypasses CloudFront 'Hit from cloudfront' stale cache
+    const recentFrom = Math.max(0, nowSec - 86400 * 30 - (nowSec % 97) - Math.floor(Math.random() * 53));
 
-    const res = await fetch(url);
-    if (!res.ok) {
-      throw new Error(`Kenkoooo HTTP ${res.status}: ${res.statusText}`);
-    }
+    const [recentSubs, baseSubs] = await Promise.all([
+      this._fetchKenkooooSubmissions(handle, recentFrom),
+      this._fetchKenkooooSubmissions(handle, 0).catch(() => [])
+    ]);
 
-    const submissions = await res.json();
-    if (!Array.isArray(submissions)) return { synced: 0, new_ac: [] };
-
+    const merged = [...baseSubs, ...recentSubs];
     const newAc = [];
-    for (const sub of submissions) {
-      if (sub.result === 'AC' && sub.problem_id) {
+    for (const sub of merged) {
+      if (sub && sub.result === 'AC' && sub.problem_id) {
         if (!this.solvedSet.has(sub.problem_id)) {
           this.solvedSet.add(sub.problem_id);
           newAc.push(sub.problem_id);
@@ -790,9 +814,61 @@ class FlowStoreClass {
     }
 
     return {
-      synced: submissions.length,
+      synced: merged.length,
       new_ac: newAc,
       total_solved: this.solvedSet.size
+    };
+  }
+
+  /**
+   * Live-verifies a specific problem's AC status on Kenkoooo with cache-busted recent window
+   * and returns rich diagnostic metadata (latest verdict, crawler lag status, handle).
+   */
+  async verifyProblemAC(problemId) {
+    const handle = (this.userState.handle || 'atrv').trim();
+    const nowSec = Math.floor(Date.now() / 1000);
+    // Query last 14 days with random second offset so CloudFront MUST miss cache and hit origin
+    const recentFrom = Math.max(0, nowSec - 86400 * 14 - Math.floor(Math.random() * 180));
+
+    const recentSubs = await this._fetchKenkooooSubmissions(handle, recentFrom);
+
+    const newAc = [];
+    for (const sub of recentSubs) {
+      if (sub && sub.result === 'AC' && sub.problem_id) {
+        if (!this.solvedSet.has(sub.problem_id)) {
+          this.solvedSet.add(sub.problem_id);
+          newAc.push(sub.problem_id);
+        }
+      }
+    }
+    if (newAc.length > 0) {
+      this.saveToLocalStorage();
+    }
+
+    const problemSubs = recentSubs
+      .filter(s => s && s.problem_id === problemId)
+      .sort((a, b) => (b.epoch_second || 0) - (a.epoch_second || 0));
+
+    const acSub = problemSubs.find(s => s.result === 'AC');
+    if (acSub || this.isSolved(problemId)) {
+      return {
+        verified: true,
+        handle,
+        latestSub: acSub || problemSubs[0] || null
+      };
+    }
+
+    const latestSub = problemSubs[0] || null;
+    const latestOverallSub = recentSubs.length > 0
+      ? [...recentSubs].sort((a, b) => (b.epoch_second || 0) - (a.epoch_second || 0))[0]
+      : null;
+
+    return {
+      verified: false,
+      handle,
+      reason: latestSub ? 'non_ac' : 'not_indexed_yet',
+      latestSub,
+      latestOverallSub
     };
   }
 

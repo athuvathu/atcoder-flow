@@ -87,13 +87,19 @@ export class ZenFlowHUD {
   }
 
   /**
-   * Cleanly ends and clears the active problem session.
+   * Cleanly ends and clears the active problem / practice session without penalty.
    */
   endSession() {
     this.destroy();
     this.currentProblem = null;
     this.elapsedSeconds = 0;
     this.isPaused = false;
+    this.sessionSolves = 0;
+    this.gauntletState = {
+      active: false,
+      stage: 1,
+      solves: []
+    };
     try {
       localStorage.removeItem('atcoder_flow_zen_state');
     } catch (_) {}
@@ -752,46 +758,43 @@ export class ZenFlowHUD {
    * Handles problem solve with instant AC check and optimistic attestation.
    */
   async handleSolve(optimistic = false) {
+    if (!this.currentProblem) return;
     const solveBtn = this.container.querySelector('#btn-zen-verify');
     if (solveBtn) {
       solveBtn.disabled = true;
-      solveBtn.textContent = 'VERIFYING...';
+      solveBtn.textContent = optimistic ? 'ATTESTING...' : 'VERIFYING...';
     }
 
     try {
-      // Case 1: Already solved
-      if (flowStore.isSolved(this.currentProblem.id)) {
-        this.showToast('Problem already recorded as solved.', 'info');
-        if (solveBtn) {
-          solveBtn.disabled = false;
-          solveBtn.textContent = '[v] VERIFY AC';
-        }
-        await this.handleSkip('neutral');
-        return;
-      }
-
       let isVerified = Boolean(optimistic);
+      let checkResult = null;
 
-      // If verifying normally, check Kenkoooo
+      // If verifying normally, live-check Kenkoooo recent window (bypasses CloudFront cache & 500-cap)
       if (!optimistic) {
         try {
-          const syncData = await flowStore.syncKenkoooo();
-          if (flowStore.isSolved(this.currentProblem.id) || (syncData.new_ac && syncData.new_ac.includes(this.currentProblem.id))) {
+          checkResult = await flowStore.verifyProblemAC(this.currentProblem.id);
+          if (checkResult && checkResult.verified) {
             isVerified = true;
           }
-        } catch (_) {}
+        } catch (netErr) {
+          checkResult = { verified: false, reason: 'network_error', error: netErr.message };
+        }
       }
 
-      // Case 2: Kenkoooo API lag detected — allow immediate 1-key attestation
+      // Case 2: Kenkoooo scraper hasn't indexed the AC yet or returned a non-AC verdict
       if (!isVerified) {
         if (solveBtn) {
           solveBtn.disabled = false;
-          solveBtn.textContent = '[Enter] ATTEST AC';
+          solveBtn.textContent = '✓ [v] RETRY VERIFY';
           solveBtn.classList.add('btn-attest-pulse');
         }
-        this.showAttestModal();
+        this.showAttestModal(checkResult);
         return;
       }
+
+      // Remove any open attest banner
+      const existingBar = this.container.querySelector('.attest-prompt-bar');
+      if (existingBar) existingBar.remove();
 
       // ===== JACKPOT: Verified or Attested AC =====
       const data = flowStore.recordSolve(this.currentProblem.id, this.elapsedSeconds, optimistic);
@@ -811,30 +814,63 @@ export class ZenFlowHUD {
       this.showToast(`Verification error: ${err.message}`, 'error');
       if (solveBtn) {
         solveBtn.disabled = false;
-        solveBtn.textContent = '[v] VERIFY AC';
+        solveBtn.textContent = '✓ [v] VERIFY AC';
       }
     }
   }
 
   /**
-   * Shows inline attestation prompt when Kenkoooo is lagging.
+   * Shows inline attestation prompt when Kenkoooo is lagging or shows a non-AC submission.
    */
-  showAttestModal() {
+  showAttestModal(checkResult = null) {
     const existing = this.container.querySelector('.attest-prompt-bar');
-    if (existing) return;
+    if (existing) existing.remove();
+
+    const handle = checkResult?.handle || flowStore.getUserState().handle || 'atrv';
+    const probId = this.currentProblem?.id || '';
+    let statusMsg = `AtCoder hides live submissions behind login; Kenkoooo's crawler hasn't indexed <strong>@${escapeHtml(handle)}</strong>'s AC on <code>${escapeHtml(probId)}</code> yet (1–5m lag).`;
+
+    if (checkResult?.reason === 'non_ac' && checkResult.latestSub) {
+      const sub = checkResult.latestSub;
+      const ageSec = Math.max(0, Math.floor(Date.now() / 1000) - (sub.epoch_second || 0));
+      const ageStr = ageSec < 60 ? `${ageSec}s ago` : ageSec < 3600 ? `${Math.floor(ageSec / 60)}m ago` : `${Math.floor(ageSec / 3600)}h ago`;
+      statusMsg = `Kenkoooo shows latest submission by <strong>@${escapeHtml(handle)}</strong> on <code>${escapeHtml(probId)}</code> is <span class="verdict-pill verdict-wa">${escapeHtml(sub.result)}</span> (${ageStr}). If you just got Green AC:`;
+    } else if (checkResult?.reason === 'network_error') {
+      statusMsg = `Could not reach Kenkoooo API (${escapeHtml(checkResult.error || 'offline')}). If you got Green AC on AtCoder:`;
+    }
 
     const bar = document.createElement('div');
     bar.className = 'attest-prompt-bar';
     bar.innerHTML = `
-      <span>Kenkoooo sync is lagging (2-5m delay). If you saw Green AC on AtCoder:</span>
-      <button id="btn-confirm-attest" class="btn-attest-confirm">[Enter] Attest AC & Continue</button>
+      <div class="attest-prompt-text">${statusMsg}</div>
+      <div class="attest-prompt-actions">
+        <button id="btn-retry-verify" class="btn-action-ghost" title="Re-poll Kenkoooo API [v]">↻ [v] Retry Check</button>
+        <button id="btn-confirm-attest" class="btn-attest-confirm" title="Immediately record AC and continue [Enter]">⚡ [Enter] Attest AC & Continue</button>
+      </div>
     `;
-    this.container.querySelector('.zen-action-cluster').prepend(bar);
 
-    bar.querySelector('#btn-confirm-attest').addEventListener('click', () => {
-      bar.remove();
-      this.handleSolve(true);
-    });
+    const workbenchBar = this.container.querySelector('.zen-workbench-bar');
+    if (workbenchBar && workbenchBar.insertAdjacentElement) {
+      workbenchBar.insertAdjacentElement('afterend', bar);
+    } else {
+      const hero = this.container.querySelector('.zen-hero') || this.container;
+      hero.appendChild(bar);
+    }
+
+    const btnConfirm = bar.querySelector('#btn-confirm-attest');
+    if (btnConfirm) {
+      btnConfirm.addEventListener('click', () => {
+        bar.remove();
+        this.handleSolve(true);
+      });
+    }
+    const btnRetry = bar.querySelector('#btn-retry-verify');
+    if (btnRetry) {
+      btnRetry.addEventListener('click', () => {
+        bar.remove();
+        this.handleSolve(false);
+      });
+    }
   }
 
   /**
@@ -1330,6 +1366,7 @@ export class ZenFlowHUD {
             <div class="pause-scrim-actions">
               <button id="btn-resume-scrim" class="btn-primary">[Space] ▶ Resume Practice</button>
               <button id="btn-reset-scrim" class="btn-action">[z] ↺ Reset Timer (00:00)</button>
+              <button id="btn-end-scrim" class="btn-action btn-end-session-bar">[w] ⏹ End Practice Session</button>
               <button id="btn-exit-scrim" class="btn-action-ghost">[Esc] ← Return to Table</button>
             </div>
           </div>
@@ -1340,6 +1377,9 @@ export class ZenFlowHUD {
           <div class="zen-nav-left">
             <button id="btn-zen-nav-back" class="btn-nav-back" title="Return to previous view (timer continues in mini-dock) [Browser Back / Esc]">
               ← Back
+            </button>
+            <button id="btn-zen-top-end" class="btn-end-session-top" title="Stop timer, end active practice session & return to Table [w]">
+              ⏹ End Session
             </button>
             <div class="zen-breadcrumb">
               <span class="crumb-root" id="zen-crumb-root" title="Return to Practice Table">TABLE</span>
@@ -1413,6 +1453,9 @@ export class ZenFlowHUD {
                   <button id="btn-zen-reset-timer" class="btn-timer-ctrl btn-timer-reset" title="Reset Stopwatch to 00:00 [z]">
                     ↺ Reset
                   </button>
+                  <button id="btn-zen-stop-timer" class="btn-timer-ctrl btn-timer-stop" title="Stop & End Practice Session [w]">
+                    ⏹ End
+                  </button>
                 </div>
               </div>
               <div class="par-subline">
@@ -1467,6 +1510,9 @@ export class ZenFlowHUD {
             <button id="btn-zen-giveup" class="btn-action-ghost btn-giveup" title="Surrender problem, view editorial & record defeat [q]">
               [q] GIVE UP
             </button>
+            <button id="btn-zen-toolbar-end" class="btn-action-ghost btn-end-session-bar" title="End active practice session without penalty & return to Table [w]">
+              [w] ⏹ END SESSION
+            </button>
           </div>
         </div>
 
@@ -1486,14 +1532,15 @@ export class ZenFlowHUD {
           <div class="footer-shortcuts">
             <span><kbd>Space</kbd> Pause</span>
             <span><kbd>z</kbd> Reset 00:00</span>
+            <span><kbd>w</kbd> End Session</span>
             <span><kbd>r</kbd> Statement</span>
             <span><kbd>n</kbd> Split Notes</span>
             <span><kbd>v</kbd> Verify AC</span>
             <span><kbd>a</kbd> Attest AC</span>
             <span><kbd>?</kbd> All Shortcuts</span>
           </div>
-          <button id="btn-zen-end-session" class="btn-end-session-subtle" title="End and clear active problem timer">
-            × End Session
+          <button id="btn-zen-end-session" class="btn-end-session-subtle" title="End and clear active problem timer [w]">
+            ⏹ End Session
           </button>
         </footer>
       </div>
@@ -1523,14 +1570,16 @@ export class ZenFlowHUD {
       });
     }
 
-    const btnEndSession = this.container.querySelector('#btn-zen-end-session');
-    if (btnEndSession) {
-      btnEndSession.addEventListener('click', () => {
-        audioEngine.playClick();
-        this.endSession();
-        this.onExit('table');
-      });
-    }
+    const triggerEndSession = () => {
+      audioEngine.playClick();
+      this.endSession();
+      this.onExit('table');
+    };
+
+    ['#btn-zen-top-end', '#btn-zen-stop-timer', '#btn-zen-toolbar-end', '#btn-end-scrim', '#btn-zen-end-session'].forEach(sel => {
+      const btn = this.container.querySelector(sel);
+      if (btn) btn.addEventListener('click', triggerEndSession);
+    });
 
     const btnClearDomain = this.container.querySelector('#btn-zen-clear-domain');
     if (btnClearDomain) {
@@ -1638,13 +1687,7 @@ export class ZenFlowHUD {
     // Verify AC & Direct Attest AC
     const btnVerify = this.container.querySelector('#btn-zen-verify');
     if (btnVerify) {
-      btnVerify.addEventListener('click', () => {
-        if (btnVerify.classList.contains('btn-attest-pulse')) {
-          this.handleSolve(true);
-        } else {
-          this.handleSolve(false);
-        }
-      });
+      btnVerify.addEventListener('click', () => this.handleSolve(false));
     }
     const btnAttest = this.container.querySelector('#btn-zen-attest');
     if (btnAttest) {
@@ -1761,6 +1804,11 @@ export class ZenFlowHUD {
     } else if (key === 'z' || key === 'Z') {
       e.preventDefault();
       this.resetTimer();
+    } else if (key === 'w' || key === 'W') {
+      e.preventDefault();
+      audioEngine.playClick();
+      this.endSession();
+      this.onExit('table');
     } else if (key === 'c') {
       e.preventDefault();
       this.pushToCPH();

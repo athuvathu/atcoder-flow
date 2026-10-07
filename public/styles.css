@@ -3390,19 +3390,113 @@ body.hide-difficulty .zen-problem-title {
 }
 
 .btn-dock-end {
-  background: transparent;
-  border: 1px solid #282a36;
-  color: var(--text-muted);
+  background: rgba(248, 113, 113, 0.08);
+  border: 1px solid rgba(248, 113, 113, 0.35);
+  color: #fca5a5;
   font-family: var(--font-mono);
-  font-size: 12px;
-  padding: 2px 7px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 10px;
   border-radius: 3px;
   cursor: pointer;
+  transition: all 0.12s ease;
 }
 
 .btn-dock-end:hover {
+  background: rgba(248, 113, 113, 0.18);
   border-color: #f87171;
-  color: #f87171;
+  color: #ffffff;
+}
+
+/* Above-the-Fold End Session Controls */
+.btn-end-session-top {
+  background: rgba(248, 113, 113, 0.08);
+  border: 1px solid rgba(248, 113, 113, 0.35);
+  color: #fca5a5;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 5px 10px;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.btn-end-session-top:hover {
+  background: rgba(248, 113, 113, 0.18);
+  border-color: #f87171;
+  color: #ffffff;
+}
+
+.btn-timer-ctrl.btn-timer-stop {
+  border-color: rgba(248, 113, 113, 0.35);
+  color: #fca5a5;
+}
+
+.btn-timer-ctrl.btn-timer-stop:hover {
+  background: rgba(248, 113, 113, 0.16);
+  border-color: #f87171;
+  color: #ffffff;
+}
+
+.btn-end-session-bar {
+  border-color: rgba(248, 113, 113, 0.35) !important;
+  color: #fca5a5 !important;
+}
+
+.btn-end-session-bar:hover {
+  background: rgba(248, 113, 113, 0.15) !important;
+  border-color: #f87171 !important;
+  color: #ffffff !important;
+}
+
+/* Diagnostic Attest / Verification Status Banner */
+.attest-prompt-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+  padding: 10px 14px;
+  background: rgba(245, 158, 11, 0.08);
+  border: 1px solid rgba(245, 158, 11, 0.45);
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-primary);
+}
+
+.attest-prompt-text {
+  line-height: 1.45;
+  color: #e2e8f0;
+}
+
+.attest-prompt-text code {
+  background: #141722;
+  padding: 1px 5px;
+  border-radius: 2px;
+  color: var(--accent-cyan);
+}
+
+.attest-prompt-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.verdict-pill {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 2px;
+  font-weight: 700;
+  font-size: 11px;
+}
+
+.verdict-pill.verdict-wa {
+  background: rgba(245, 158, 11, 0.2);
+  border: 1px solid #f59e0b;
+  color: #fbbf24;
 }
 
 /* Global Keyboard Shortcuts Modal */
@@ -3473,4 +3567,3 @@ body.hide-difficulty .zen-problem-title {
   font-size: 11px;
   color: var(--text-secondary);
 }
-
