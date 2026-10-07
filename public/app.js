@@ -288,12 +288,25 @@ class AtCoderFlowApp {
         if (e.key === 'Escape') {
           e.preventDefault();
           this.closeCardLightbox();
+        } else if (e.key === ' ') {
+          e.preventDefault();
+          this.toggleSlideshowPlayPause();
         } else if (e.key === 'ArrowRight' || e.key === 'j') {
           e.preventDefault();
-          this.stepLightboxCard(1);
+          if (this.slideshowActive && this.slideshowMode === 'stream') {
+            this.advanceSlideshowSlide(true);
+          } else {
+            this.stepLightboxCard(1);
+          }
         } else if (e.key === 'ArrowLeft' || e.key === 'k') {
           e.preventDefault();
           this.stepLightboxCard(-1);
+        } else if (e.key === '+' || e.key === '=' || e.key === ']') {
+          e.preventDefault();
+          this.adjustSlideshowInterval(1);
+        } else if (e.key === '-' || e.key === '_' || e.key === '[') {
+          e.preventDefault();
+          this.adjustSlideshowInterval(-1);
         } else if (e.key.toLowerCase() === 'f') {
           e.preventDefault();
           this.toggleNativeFullscreen(lightboxOverlay);
@@ -962,6 +975,7 @@ class AtCoderFlowApp {
     const cards = flowStore.getCardCollection();
     const ssrCount = cards.filter(c => c.rarityTier === 'SSR').length;
     const srCount = cards.filter(c => c.rarityTier === 'SR').length;
+    const intervalSec = this.getSlideshowIntervalSec();
 
     container.innerHTML = `
       <div class="shortcuts-modal-header">
@@ -969,7 +983,8 @@ class AtCoderFlowApp {
           <strong>🃏 ANIME ARTWORK REWARD VAULT (GACHA COLLECTION)</strong>
           <span class="shortcuts-sub">Click any artwork to view Full Window / Fullscreen · ${cards.length} collected (${ssrCount} SSR · ${srCount} SR)</span>
         </div>
-        <div style="display:flex; gap:8px; align-items:center;">
+        <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+          <button id="btn-start-relax-slideshow" class="btn-slideshow-launch" title="Launch consecutive Full-Window Waifu Slideshow (${intervalSec}s adjustable)">▶ RELAX SLIDESHOW (${intervalSec}s)</button>
           <button id="btn-roll-gacha-now" class="btn-flow-launch" title="Roll a new Anime Artwork Card from Waifu.im right now">🎲 ROLL NEW CARD</button>
           ${cards.length > 0 ? `<button id="btn-clear-vault" class="btn-drawer-close" title="Clear all cards from Vault">🗑 CLEAR ALL</button>` : ''}
           <button id="btn-close-cards-modal" class="btn-drawer-close">[Esc] CLOSE</button>
@@ -979,7 +994,10 @@ class AtCoderFlowApp {
       ${cards.length === 0 ? `
         <div class="cards-empty-state">
           <p>No reward cards unlocked yet. Every verified or attested <strong>AC Solve</strong> automatically drops a new Waifu.im Artwork Card!</p>
-          <button id="btn-roll-first-card" class="btn-zen-primary" style="margin-top:10px;">🎲 Roll Your First Starter Card</button>
+          <div style="display:flex; gap:10px; justify-content:center; margin-top:12px;">
+            <button id="btn-roll-first-card" class="btn-zen-primary">🎲 Roll Your First Starter Card</button>
+            <button id="btn-empty-relax-slideshow" class="btn-slideshow-launch">▶ Start Relax Slideshow (${intervalSec}s Stream)</button>
+          </div>
         </div>
       ` : `
         <div class="cards-vault-grid">
@@ -1008,6 +1026,8 @@ class AtCoderFlowApp {
     `;
 
     document.getElementById('btn-close-cards-modal')?.addEventListener('click', () => this.closeCardsGalleryModal());
+    document.getElementById('btn-start-relax-slideshow')?.addEventListener('click', () => this.startRelaxSlideshow('stream'));
+    document.getElementById('btn-empty-relax-slideshow')?.addEventListener('click', () => this.startRelaxSlideshow('stream'));
     document.getElementById('btn-clear-vault')?.addEventListener('click', () => {
       flowStore.clearRewardCards();
       this.updateHudDOM();
@@ -1054,6 +1074,229 @@ class AtCoderFlowApp {
     });
   }
 
+  getSlideshowIntervalSec() {
+    const saved = Number(localStorage.getItem('flow_slideshow_sec'));
+    return Number.isFinite(saved) && saved >= 1 && saved <= 120 ? saved : 4;
+  }
+
+  setSlideshowIntervalSec(sec) {
+    const clamped = Math.max(1, Math.min(120, Math.round(Number(sec) || 4)));
+    this.slideshowIntervalSec = clamped;
+    localStorage.setItem('flow_slideshow_sec', String(clamped));
+    if (this.slideshowActive) {
+      this.scheduleNextSlide();
+    }
+    this.renderLightboxDOM();
+    const galleryModal = document.getElementById('cards-modal-overlay');
+    if (galleryModal && galleryModal.style.display !== 'none') {
+      this.renderCardsGalleryContent();
+    }
+  }
+
+  adjustSlideshowInterval(deltaSec) {
+    const current = this.getSlideshowIntervalSec();
+    this.setSlideshowIntervalSec(current + deltaSec);
+    this.showToast(`Slideshow interval: ${this.getSlideshowIntervalSec()}s`);
+  }
+
+  /**
+   * Launches the consecutive Waifu Relax Slideshow in Full-Window Lightbox mode.
+   * Preloads upcoming images in a background queue so 4-second transitions are instant.
+   */
+  async startRelaxSlideshow(mode = 'stream') {
+    audioEngine.playClick();
+    this.slideshowMode = mode || localStorage.getItem('flow_slideshow_mode') || 'stream';
+    localStorage.setItem('flow_slideshow_mode', this.slideshowMode);
+    this.slideshowIntervalSec = this.getSlideshowIntervalSec();
+    this.slideshowActive = true;
+    this.slideshowPaused = false;
+    this.slideshowPreloadQueue = this.slideshowPreloadQueue || [];
+
+    const overlay = document.getElementById('card-lightbox-overlay');
+    if (!overlay) return;
+    overlay.style.display = 'flex';
+
+    // If no card is currently in lightbox, grab the first one immediately
+    if (!this.lightboxCard) {
+      const existing = flowStore.getCardCollection();
+      if (existing.length > 0 && this.slideshowMode === 'vault') {
+        this.lightboxIndex = 0;
+        this.lightboxCard = existing[0];
+      } else {
+        overlay.innerHTML = `
+          <div class="lightbox-stage">
+            <div style="color:var(--accent-cyan); font-size:14px; font-weight:700;">✨ Pulling fresh Waifu.im stream...</div>
+          </div>
+        `;
+        try {
+          const firstCard = await this.pullPreloadedCardOrFetch();
+          this.lightboxCard = firstCard;
+          this.lightboxIndex = 0;
+        } catch (err) {
+          this.showToast(`Stream error: ${err.message}`, 'error');
+          if (existing.length > 0) {
+            this.lightboxCard = existing[0];
+            this.lightboxIndex = 0;
+          } else {
+            this.closeCardLightbox();
+            return;
+          }
+        }
+      }
+    }
+
+    this.renderLightboxDOM();
+    this.fillSlideshowPreloadQueue();
+    this.scheduleNextSlide();
+  }
+
+  toggleSlideshowPlayPause() {
+    audioEngine.playClick();
+    if (!this.slideshowActive) {
+      this.startRelaxSlideshow(this.slideshowMode || 'stream');
+      return;
+    }
+    this.slideshowPaused = !this.slideshowPaused;
+    if (this.slideshowPaused) {
+      this.stopSlideshowTimer();
+      this.showToast('⏸ Slideshow paused [Space to resume]');
+    } else {
+      this.fillSlideshowPreloadQueue();
+      this.scheduleNextSlide();
+      this.showToast(`▶ Slideshow resumed (${this.getSlideshowIntervalSec()}s)`);
+    }
+    this.renderLightboxDOM();
+  }
+
+  toggleSlideshowSourceMode() {
+    audioEngine.playClick();
+    this.slideshowMode = this.slideshowMode === 'vault' ? 'stream' : 'vault';
+    localStorage.setItem('flow_slideshow_mode', this.slideshowMode);
+    if (this.slideshowMode === 'stream') {
+      this.fillSlideshowPreloadQueue();
+    }
+    this.renderLightboxDOM();
+    this.showToast(this.slideshowMode === 'stream' ? '🌐 Streaming consecutive NEW Waifu.im cards' : '🃏 Cycling saved Vault cards');
+  }
+
+  async pullPreloadedCardOrFetch() {
+    if (this.slideshowPreloadQueue && this.slideshowPreloadQueue.length > 0) {
+      const next = this.slideshowPreloadQueue.shift();
+      this.fillSlideshowPreloadQueue();
+      return next;
+    }
+    const card = await flowStore.rollRewardCard(this.zen?.currentProblem || null, null);
+    await this.preloadImageUrl(card.fullUrl || card.imageUrl);
+    this.updateHudDOM();
+    const galleryModal = document.getElementById('cards-modal-overlay');
+    if (galleryModal && galleryModal.style.display !== 'none') {
+      this.renderCardsGalleryContent();
+    }
+    return card;
+  }
+
+  preloadImageUrl(url) {
+    return new Promise((resolve) => {
+      if (!url) return resolve();
+      const img = new Image();
+      let settled = false;
+      const done = () => {
+        if (!settled) {
+          settled = true;
+          resolve();
+        }
+      };
+      img.onload = done;
+      img.onerror = done;
+      setTimeout(done, 6500);
+      img.src = url;
+    });
+  }
+
+  async fillSlideshowPreloadQueue() {
+    if (this.slideshowPreloading) return;
+    if (!this.slideshowActive || this.slideshowPaused || this.slideshowMode !== 'stream') return;
+    this.slideshowPreloading = true;
+    try {
+      this.slideshowPreloadQueue = this.slideshowPreloadQueue || [];
+      while (this.slideshowActive && !this.slideshowPaused && this.slideshowMode === 'stream' && this.slideshowPreloadQueue.length < 2) {
+        const card = await flowStore.rollRewardCard(this.zen?.currentProblem || null, null);
+        await this.preloadImageUrl(card.fullUrl || card.imageUrl);
+        this.slideshowPreloadQueue.push(card);
+        this.updateHudDOM();
+      }
+    } catch (_) {
+      // Silently retry on next tick if network hiccups
+    } finally {
+      this.slideshowPreloading = false;
+    }
+  }
+
+  stopSlideshowTimer() {
+    if (this.slideshowTimer) {
+      clearTimeout(this.slideshowTimer);
+      this.slideshowTimer = null;
+    }
+  }
+
+  scheduleNextSlide() {
+    this.stopSlideshowTimer();
+    if (!this.slideshowActive || this.slideshowPaused) return;
+    const durationMs = this.getSlideshowIntervalSec() * 1000;
+
+    // Reset CSS progress bar animation smoothly
+    const bar = document.getElementById('lightbox-progress-bar');
+    if (bar) {
+      bar.style.transition = 'none';
+      bar.style.width = '0%';
+      void bar.offsetWidth; // force reflow
+      bar.style.transition = `width ${durationMs}ms linear`;
+      bar.style.width = '100%';
+    }
+
+    this.slideshowTimer = setTimeout(() => {
+      this.advanceSlideshowSlide(false);
+    }, durationMs);
+  }
+
+  async advanceSlideshowSlide(manualTrigger = false) {
+    this.stopSlideshowTimer();
+    if (!this.slideshowActive && !manualTrigger) return;
+
+    const mode = this.slideshowMode || 'stream';
+    if (mode === 'vault') {
+      this.stepLightboxCard(1, true);
+      if (this.slideshowActive && !this.slideshowPaused) {
+        this.scheduleNextSlide();
+      }
+      return;
+    }
+
+    // Stream new Waifu.im card
+    try {
+      const statusBadge = document.getElementById('lb-stream-status');
+      if (statusBadge && (!this.slideshowPreloadQueue || this.slideshowPreloadQueue.length === 0)) {
+        statusBadge.textContent = '⏳ LOADING NEXT...';
+      }
+      const nextCard = await this.pullPreloadedCardOrFetch();
+      if (!this.slideshowActive && !manualTrigger) return;
+      this.lightboxCard = nextCard;
+      this.lightboxIndex = 0;
+      const galleryModal = document.getElementById('cards-modal-overlay');
+      if (galleryModal && galleryModal.style.display !== 'none') {
+        this.renderCardsGalleryContent();
+      }
+      this.renderLightboxDOM();
+    } catch (err) {
+      this.showToast(`Slideshow fetch retry: ${err.message}`, 'error');
+    }
+
+    if (this.slideshowActive && !this.slideshowPaused) {
+      this.scheduleNextSlide();
+      this.fillSlideshowPreloadQueue();
+    }
+  }
+
   /**
    * Opens a Full-Window / Fullscreen Lightbox for inspecting an artwork card at maximum resolution.
    */
@@ -1079,22 +1322,44 @@ class AtCoderFlowApp {
     const c = this.lightboxCard;
     const total = cards.length;
     const posStr = total > 0 ? `${this.lightboxIndex + 1} / ${total}` : '1 / 1';
+    const intervalSec = this.getSlideshowIntervalSec();
+    const isRunning = this.slideshowActive && !this.slideshowPaused;
+    const mode = this.slideshowMode || localStorage.getItem('flow_slideshow_mode') || 'stream';
+    const presets = [2, 3, 4, 6, 10];
 
     overlay.innerHTML = `
+      <div class="lightbox-progress-track">
+        <div id="lightbox-progress-bar" class="lightbox-progress-bar" style="width:${isRunning ? '100%' : '0%'};"></div>
+      </div>
       <div class="lightbox-top-hud">
         <div class="lightbox-meta-left">
           <span class="lightbox-rarity-badge" style="color:${c.rarityColor || '#00e5ff'}; border-color:${c.rarityColor || '#00e5ff'};">${c.rarity || 'R'}</span>
           <strong class="lightbox-title">${c.character || 'Anime Illustration'}</strong>
-          <span class="lightbox-sub">Art by ${c.artist || 'Illustrator'} · ${(c.problemId || 'AC').toUpperCase()} (${Math.max(100, c.problemDiff || 1200)}) · [${posStr}]</span>
+          <span class="lightbox-sub">Art by ${c.artist || 'Illustrator'} · [${posStr}]</span>
+          ${this.slideshowActive ? `<span id="lb-stream-status" class="lb-stream-badge">${this.slideshowPaused ? '⏸ PAUSED' : `● LIVE ${intervalSec}s`}</span>` : ''}
         </div>
         <div class="lightbox-actions-right">
-          ${total > 1 ? `
-            <button type="button" id="btn-lb-prev" class="btn-drawer-close" title="Previous Card [← or k]">← PREV</button>
-            <button type="button" id="btn-lb-next" class="btn-drawer-close" title="Next Card [→ or j]">NEXT →</button>
-          ` : ''}
-          <button type="button" id="btn-lb-native-fs" class="btn-flow-launch" title="Toggle 100% Monitor Fullscreen [f]">⛶ [f] MONITOR FULLSCREEN</button>
+          <div class="slideshow-controls-pill">
+            <button type="button" id="btn-lb-slideshow-toggle" class="${isRunning ? 'btn-slideshow-active' : 'btn-slideshow-launch'}" title="Toggle Relax Slideshow [Space]">
+              ${isRunning ? '⏸ PAUSE [Space]' : (this.slideshowActive && this.slideshowPaused ? '▶ RESUME [Space]' : '▶ RELAX SLIDESHOW')}
+            </button>
+            <button type="button" id="btn-lb-slideshow-mode" class="btn-drawer-close" title="Switch between streaming new Waifu.im cards vs cycling saved Vault">
+              ${mode === 'stream' ? '🌐 NEW STREAM' : '🃏 VAULT'}
+            </button>
+            <div class="slideshow-interval-group" title="Slideshow Interval (seconds) [- / + keys]">
+              <button type="button" id="btn-lb-sec-dec" class="btn-sec-step">−</button>
+              ${presets.map(s => `
+                <button type="button" class="btn-sec-preset ${intervalSec === s ? 'active' : ''}" data-sec="${s}">${s}s</button>
+              `).join('')}
+              ${!presets.includes(intervalSec) ? `<span class="btn-sec-preset active">${intervalSec}s</span>` : ''}
+              <button type="button" id="btn-lb-sec-inc" class="btn-sec-step">+</button>
+            </div>
+          </div>
+          <button type="button" id="btn-lb-prev" class="btn-drawer-close" title="Previous Card [← or k]">←</button>
+          <button type="button" id="btn-lb-next" class="btn-drawer-close" title="Next / Pull New [→ or j]">→</button>
+          <button type="button" id="btn-lb-native-fs" class="btn-flow-launch" title="Toggle 100% Monitor Fullscreen [f]">⛶ [f] FULLSCREEN</button>
           <a href="${c.fullUrl || c.imageUrl}" target="_blank" rel="noopener" class="btn-drawer-close">RAW ↗</a>
-          <button type="button" id="btn-lb-close" class="btn-drawer-close">[Esc] CLOSE ✕</button>
+          <button type="button" id="btn-lb-close" class="btn-drawer-close">[Esc] ✕</button>
         </div>
       </div>
       <div class="lightbox-stage" id="lightbox-backdrop">
@@ -1103,21 +1368,52 @@ class AtCoderFlowApp {
     `;
 
     overlay.querySelector('#btn-lb-close')?.addEventListener('click', () => this.closeCardLightbox());
+    overlay.querySelector('#btn-lb-slideshow-toggle')?.addEventListener('click', () => this.toggleSlideshowPlayPause());
+    overlay.querySelector('#btn-lb-slideshow-mode')?.addEventListener('click', () => this.toggleSlideshowSourceMode());
+    overlay.querySelector('#btn-lb-sec-dec')?.addEventListener('click', () => this.adjustSlideshowInterval(-1));
+    overlay.querySelector('#btn-lb-sec-inc')?.addEventListener('click', () => this.adjustSlideshowInterval(1));
+    overlay.querySelectorAll('.btn-sec-preset[data-sec]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        this.setSlideshowIntervalSec(Number(btn.dataset.sec));
+      });
+    });
     overlay.querySelector('#btn-lb-prev')?.addEventListener('click', () => this.stepLightboxCard(-1));
-    overlay.querySelector('#btn-lb-next')?.addEventListener('click', () => this.stepLightboxCard(1));
+    overlay.querySelector('#btn-lb-next')?.addEventListener('click', () => {
+      if (this.slideshowActive && this.slideshowMode === 'stream') {
+        this.advanceSlideshowSlide(true);
+      } else {
+        this.stepLightboxCard(1);
+      }
+    });
     overlay.querySelector('#btn-lb-native-fs')?.addEventListener('click', () => this.toggleNativeFullscreen(overlay));
     overlay.querySelector('#lightbox-backdrop')?.addEventListener('click', (e) => {
       if (e.target.id === 'lightbox-backdrop') this.closeCardLightbox();
     });
+
+    // If slideshow is currently running, trigger the progress bar transition
+    if (isRunning) {
+      const bar = document.getElementById('lightbox-progress-bar');
+      if (bar) {
+        const durationMs = intervalSec * 1000;
+        bar.style.transition = 'none';
+        bar.style.width = '0%';
+        void bar.offsetWidth;
+        bar.style.transition = `width ${durationMs}ms linear`;
+        bar.style.width = '100%';
+      }
+    }
   }
 
-  stepLightboxCard(dir = 1) {
+  stepLightboxCard(dir = 1, fromSlideshow = false) {
     const cards = flowStore.getCardCollection();
     if (cards.length <= 1) return;
-    audioEngine.playClick();
+    if (!fromSlideshow) audioEngine.playClick();
     this.lightboxIndex = (this.lightboxIndex + dir + cards.length) % cards.length;
     this.lightboxCard = cards[this.lightboxIndex];
     this.renderLightboxDOM();
+    if (this.slideshowActive && !this.slideshowPaused && !fromSlideshow) {
+      this.scheduleNextSlide();
+    }
   }
 
   toggleNativeFullscreen(targetEl) {
@@ -1129,6 +1425,9 @@ class AtCoderFlowApp {
   }
 
   closeCardLightbox() {
+    this.slideshowActive = false;
+    this.slideshowPaused = false;
+    this.stopSlideshowTimer();
     if (document.fullscreenElement) {
       document.exitFullscreen?.().catch(() => {});
     }

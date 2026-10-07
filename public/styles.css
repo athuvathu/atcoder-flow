@@ -4378,3 +4378,102 @@ body.hide-difficulty .zen-problem-title {
   cursor: default;
 }
 
+/* Relax Slideshow Progress Bar & Controls */
+.lightbox-progress-track {
+  width: 100%;
+  height: 3px;
+  background: #0d0f17;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.lightbox-progress-bar {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, var(--accent-cyan), #e040fb);
+}
+
+.lb-stream-badge {
+  background: rgba(224, 64, 251, 0.14);
+  border: 1px solid #e040fb;
+  color: #e040fb;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 3px;
+  letter-spacing: 0.5px;
+}
+
+.slideshow-controls-pill {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: #0d1018;
+  border: 1px solid #232738;
+  padding: 3px 6px;
+  border-radius: 4px;
+}
+
+.btn-slideshow-launch {
+  background: rgba(224, 64, 251, 0.14);
+  border: 1px solid #e040fb;
+  color: #f3b8ff;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  padding: 5px 10px;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-slideshow-launch:hover {
+  background: rgba(224, 64, 251, 0.28);
+  color: #ffffff;
+}
+
+.btn-slideshow-active {
+  background: rgba(0, 230, 118, 0.16);
+  border: 1px solid var(--accent-green);
+  color: var(--accent-green);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  padding: 5px 10px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.slideshow-interval-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  background: #07080d;
+  border: 1px solid #1e2230;
+  border-radius: 3px;
+  padding: 1px;
+}
+
+.btn-sec-step,
+.btn-sec-preset {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  padding: 3px 6px;
+  border-radius: 2px;
+  cursor: pointer;
+}
+
+.btn-sec-step:hover,
+.btn-sec-preset:hover {
+  color: var(--text-primary);
+  background: #171a26;
+}
+
+.btn-sec-preset.active {
+  background: var(--accent-cyan);
+  color: #050608;
+}
