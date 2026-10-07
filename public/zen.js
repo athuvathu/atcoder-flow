@@ -1088,7 +1088,7 @@ export class ZenFlowHUD {
 
     this.container.appendChild(overlay);
 
-    // Roll SFW Anime Artwork Reward Card asynchronously so we never block AC celebration
+    // Roll Anime Artwork Reward Card asynchronously so we never block AC celebration
     const probSnapshot = this.currentProblem;
     flowStore.rollRewardCard(probSnapshot, data).then(card => {
       this.onSolveAC(); // Refresh HUD card count
@@ -1096,15 +1096,30 @@ export class ZenFlowHUD {
       if (!slot || !card) return;
       slot.innerHTML = `
         <div class="ac-reward-card-preview" style="border-color:${card.rarityColor};">
-          <img src="${escapeHtml(card.imageUrl)}" alt="Anime Reward Card" class="ac-reward-thumb" loading="lazy" />
-          <div class="ac-reward-meta">
-            <span class="ac-reward-rarity" style="color:${card.rarityColor};">[ ★ UNLOCKED CARD: ${escapeHtml(card.rarity)} ]</span>
-            <strong class="ac-reward-title">${escapeHtml(card.character)}</strong>
-            <span class="ac-reward-sub">Art by ${escapeHtml(card.artist)} · Saved to [i] Card Vault (${flowStore.getCardCollection().length} total)</span>
+          <div class="ac-reward-img-stage" id="ac-reward-img-trigger" title="Click to view Full Window / Fullscreen">
+            <img src="${escapeHtml(card.imageUrl)}" alt="Anime Reward Card" class="ac-reward-thumb" />
+            <span class="ac-reward-zoom-hint">⛶ CLICK FOR FULL WINDOW</span>
           </div>
-          <a href="${escapeHtml(card.fullUrl)}" target="_blank" rel="noopener" class="btn-action-ghost" style="font-size:10px; padding:4px 8px;">FULL ART ↗</a>
+          <div class="ac-reward-footer">
+            <div class="ac-reward-meta">
+              <span class="ac-reward-rarity" style="color:${card.rarityColor};">[ ★ UNLOCKED CARD: ${escapeHtml(card.rarity)} ]</span>
+              <strong class="ac-reward-title">${escapeHtml(card.character)}</strong>
+              <span class="ac-reward-sub">Art by ${escapeHtml(card.artist)} · Saved to [i] Vault (${flowStore.getCardCollection().length} total)</span>
+            </div>
+            <div class="ac-reward-btns">
+              <button type="button" id="btn-ac-card-fullscreen" class="btn-zen-primary" style="font-size:11px; padding:6px 12px;">⛶ FULL WINDOW</button>
+              <a href="${escapeHtml(card.fullUrl)}" target="_blank" rel="noopener" class="btn-action-ghost" style="font-size:11px; padding:6px 10px;">RAW ↗</a>
+            </div>
+          </div>
         </div>
       `;
+      const openFull = () => {
+        if (window.__atcoderApp && typeof window.__atcoderApp.openCardLightbox === 'function') {
+          window.__atcoderApp.openCardLightbox(card);
+        }
+      };
+      slot.querySelector('#ac-reward-img-trigger')?.addEventListener('click', openFull);
+      slot.querySelector('#btn-ac-card-fullscreen')?.addEventListener('click', openFull);
     }).catch(() => {
       const slot = overlay.querySelector('#ac-reward-card-slot');
       if (slot) slot.innerHTML = '';

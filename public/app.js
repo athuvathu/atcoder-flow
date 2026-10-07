@@ -120,10 +120,13 @@ class AtCoderFlowApp {
         <div class="shortcuts-modal-card rating-telemetry-card" id="rating-telemetry-body"></div>
       </div>
 
-      <!-- SFW Anime Artwork Reward Card Vault Modal -->
+      <!-- Anime Artwork Reward Card Vault Modal -->
       <div id="cards-gallery-overlay" class="shortcuts-modal-overlay" style="display:none;">
-        <div class="shortcuts-modal-card rating-telemetry-card" id="cards-gallery-body"></div>
+        <div class="shortcuts-modal-card rating-telemetry-card cards-vault-modal-card" id="cards-gallery-body"></div>
       </div>
+
+      <!-- Full-Window / Fullscreen Card Lightbox Overlay -->
+      <div id="card-lightbox-overlay" class="card-lightbox-overlay" style="display:none;"></div>
 
       <!-- Universal Command Palette (Ctrl+K / /) -->
       <div id="cmd-palette-overlay" class="cmd-palette-overlay" style="display:none;">
@@ -279,6 +282,25 @@ class AtCoderFlowApp {
 
   attachGlobalKeynav() {
     window.addEventListener('keydown', (e) => {
+      // Full-Window Card Lightbox takes highest priority when open
+      const lightboxOverlay = document.getElementById('card-lightbox-overlay');
+      if (lightboxOverlay && lightboxOverlay.style.display !== 'none') {
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          this.closeCardLightbox();
+        } else if (e.key === 'ArrowRight' || e.key === 'j') {
+          e.preventDefault();
+          this.stepLightboxCard(1);
+        } else if (e.key === 'ArrowLeft' || e.key === 'k') {
+          e.preventDefault();
+          this.stepLightboxCard(-1);
+        } else if (e.key.toLowerCase() === 'f') {
+          e.preventDefault();
+          this.toggleNativeFullscreen(lightboxOverlay);
+        }
+        return;
+      }
+
       // Global Ctrl+K / Cmd+K Command Palette trigger (works everywhere)
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
@@ -944,8 +966,8 @@ class AtCoderFlowApp {
     container.innerHTML = `
       <div class="shortcuts-modal-header">
         <div>
-          <strong>🃏 ANIME ARTWORK REWARD VAULT (SFW GACHA COLLECTION)</strong>
-          <span class="shortcuts-sub">Solve problems (or beat Par / hit Frontier Leaps) to unlock higher-rarity SFW character cards (${cards.length} collected · ${ssrCount} SSR · ${srCount} SR)</span>
+          <strong>🃏 ANIME ARTWORK REWARD VAULT (GACHA COLLECTION)</strong>
+          <span class="shortcuts-sub">Click any artwork to view Full Window / Fullscreen · ${cards.length} collected (${ssrCount} SSR · ${srCount} SR)</span>
         </div>
         <div style="display:flex; gap:8px; align-items:center;">
           <button id="btn-roll-gacha-now" class="btn-flow-launch" title="Roll a new Anime Artwork Card from Waifu.im right now">🎲 ROLL NEW CARD</button>
@@ -961,17 +983,21 @@ class AtCoderFlowApp {
         </div>
       ` : `
         <div class="cards-vault-grid">
-          ${cards.map(c => `
+          ${cards.map((c, idx) => `
             <div class="reward-vault-card" style="border-color:${c.rarityColor || '#262936'}66;">
-              <div class="rvc-image-wrap">
+              <div class="rvc-image-wrap" data-idx="${idx}" title="Click to open Full Window / Fullscreen">
                 <img src="${c.imageUrl}" alt="${c.character || 'Anime Card'}" loading="lazy" class="rvc-img" />
                 <span class="rvc-rarity-pill" style="color:${c.rarityColor}; border-color:${c.rarityColor};">${c.rarityTier || 'R'}</span>
+                <span class="rvc-zoom-overlay">⛶ FULL WINDOW</span>
               </div>
               <div class="rvc-info">
                 <div class="rvc-title" title="${c.character || ''}">${c.character || 'Anime Illustration'}</div>
                 <div class="rvc-meta">Art: ${c.artist || 'Illustrator'} · <span style="color:var(--accent-cyan);">${(c.problemId || 'AC').toUpperCase()} (${Math.max(100, c.problemDiff || 1200)})</span></div>
                 <div class="rvc-actions">
-                  <a href="${c.fullUrl || c.imageUrl}" target="_blank" rel="noopener" class="btn-copy-sample">FULL ART ↗</a>
+                  <div style="display:flex; gap:6px;">
+                    <button type="button" class="btn-copy-sample btn-full-card" data-idx="${idx}">⛶ FULL WINDOW</button>
+                    <a href="${c.fullUrl || c.imageUrl}" target="_blank" rel="noopener" class="btn-copy-sample">RAW ↗</a>
+                  </div>
                   <button class="btn-copy-sample btn-del-card" data-id="${c.id}" title="Remove from Vault">✕</button>
                 </div>
               </div>
@@ -1011,6 +1037,14 @@ class AtCoderFlowApp {
     const btnFirst = document.getElementById('btn-roll-first-card');
     if (btnFirst) btnFirst.addEventListener('click', () => rollHandler(btnFirst));
 
+    container.querySelectorAll('.rvc-image-wrap, .btn-full-card').forEach(el => {
+      el.addEventListener('click', () => {
+        const idx = Number(el.dataset.idx);
+        const card = cards[idx];
+        if (card) this.openCardLightbox(card, idx);
+      });
+    });
+
     container.querySelectorAll('.btn-del-card').forEach(btn => {
       btn.addEventListener('click', () => {
         flowStore.deleteRewardCard(btn.dataset.id);
@@ -1018,6 +1052,91 @@ class AtCoderFlowApp {
         this.renderCardsGalleryContent();
       });
     });
+  }
+
+  /**
+   * Opens a Full-Window / Fullscreen Lightbox for inspecting an artwork card at maximum resolution.
+   */
+  openCardLightbox(card, indexHint = null) {
+    audioEngine.playClick();
+    const overlay = document.getElementById('card-lightbox-overlay');
+    if (!overlay || !card) return;
+
+    const cards = flowStore.getCardCollection();
+    const foundIdx = indexHint !== null ? indexHint : cards.findIndex(c => c.id === card.id);
+    this.lightboxIndex = foundIdx >= 0 ? foundIdx : 0;
+    this.lightboxCard = card;
+
+    overlay.style.display = 'flex';
+    this.renderLightboxDOM();
+  }
+
+  renderLightboxDOM() {
+    const overlay = document.getElementById('card-lightbox-overlay');
+    if (!overlay || !this.lightboxCard) return;
+
+    const cards = flowStore.getCardCollection();
+    const c = this.lightboxCard;
+    const total = cards.length;
+    const posStr = total > 0 ? `${this.lightboxIndex + 1} / ${total}` : '1 / 1';
+
+    overlay.innerHTML = `
+      <div class="lightbox-top-hud">
+        <div class="lightbox-meta-left">
+          <span class="lightbox-rarity-badge" style="color:${c.rarityColor || '#00e5ff'}; border-color:${c.rarityColor || '#00e5ff'};">${c.rarity || 'R'}</span>
+          <strong class="lightbox-title">${c.character || 'Anime Illustration'}</strong>
+          <span class="lightbox-sub">Art by ${c.artist || 'Illustrator'} · ${(c.problemId || 'AC').toUpperCase()} (${Math.max(100, c.problemDiff || 1200)}) · [${posStr}]</span>
+        </div>
+        <div class="lightbox-actions-right">
+          ${total > 1 ? `
+            <button type="button" id="btn-lb-prev" class="btn-drawer-close" title="Previous Card [← or k]">← PREV</button>
+            <button type="button" id="btn-lb-next" class="btn-drawer-close" title="Next Card [→ or j]">NEXT →</button>
+          ` : ''}
+          <button type="button" id="btn-lb-native-fs" class="btn-flow-launch" title="Toggle 100% Monitor Fullscreen [f]">⛶ [f] MONITOR FULLSCREEN</button>
+          <a href="${c.fullUrl || c.imageUrl}" target="_blank" rel="noopener" class="btn-drawer-close">RAW ↗</a>
+          <button type="button" id="btn-lb-close" class="btn-drawer-close">[Esc] CLOSE ✕</button>
+        </div>
+      </div>
+      <div class="lightbox-stage" id="lightbox-backdrop">
+        <img src="${c.fullUrl || c.imageUrl}" alt="${c.character || 'Full Artwork'}" class="lightbox-full-img" />
+      </div>
+    `;
+
+    overlay.querySelector('#btn-lb-close')?.addEventListener('click', () => this.closeCardLightbox());
+    overlay.querySelector('#btn-lb-prev')?.addEventListener('click', () => this.stepLightboxCard(-1));
+    overlay.querySelector('#btn-lb-next')?.addEventListener('click', () => this.stepLightboxCard(1));
+    overlay.querySelector('#btn-lb-native-fs')?.addEventListener('click', () => this.toggleNativeFullscreen(overlay));
+    overlay.querySelector('#lightbox-backdrop')?.addEventListener('click', (e) => {
+      if (e.target.id === 'lightbox-backdrop') this.closeCardLightbox();
+    });
+  }
+
+  stepLightboxCard(dir = 1) {
+    const cards = flowStore.getCardCollection();
+    if (cards.length <= 1) return;
+    audioEngine.playClick();
+    this.lightboxIndex = (this.lightboxIndex + dir + cards.length) % cards.length;
+    this.lightboxCard = cards[this.lightboxIndex];
+    this.renderLightboxDOM();
+  }
+
+  toggleNativeFullscreen(targetEl) {
+    if (!document.fullscreenElement) {
+      (targetEl || document.documentElement).requestFullscreen?.().catch(() => {});
+    } else {
+      document.exitFullscreen?.().catch(() => {});
+    }
+  }
+
+  closeCardLightbox() {
+    if (document.fullscreenElement) {
+      document.exitFullscreen?.().catch(() => {});
+    }
+    const overlay = document.getElementById('card-lightbox-overlay');
+    if (overlay) {
+      overlay.style.display = 'none';
+      overlay.innerHTML = '';
+    }
   }
 
   /**
