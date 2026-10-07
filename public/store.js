@@ -379,7 +379,7 @@ class FlowStoreClass {
     let cardData = null;
 
     // 1. Primary API: waifu.im (https://api.waifu.im/search)
-    const waifuImUrl = 'https://api.waifu.im/search?included_tags=waifu&is_nsfw=false';
+    const waifuImUrl = 'https://api.waifu.im/search?is_nsfw=false';
     try {
       const res = await fetch(waifuImUrl, {
         headers: { Accept: 'application/json' },
@@ -389,7 +389,7 @@ class FlowStoreClass {
         const d = await res.json();
         const img = Array.isArray(d?.images) ? d.images[0] : null;
         if (img && img.url) {
-          const tagNames = Array.isArray(img.tags) ? img.tags.map(t => t.name).filter(Boolean) : ['waifu'];
+          const tagNames = Array.isArray(img.tags) ? img.tags.map(t => t.name).filter(Boolean) : ['anime'];
           cardData = {
             id: `card_${img.image_id || Date.now()}_${Math.floor(Math.random() * 1000)}`,
             imageUrl: img.url,
@@ -397,9 +397,9 @@ class FlowStoreClass {
             rarity,
             rarityTier,
             rarityColor,
-            category: tagNames[0] || 'waifu',
+            category: tagNames[0] || 'anime',
             tags: tagNames.slice(0, 5),
-            character: tagNames.join(' · ') || 'Waifu Illustration',
+            character: tagNames.join(' · ') || 'Anime Illustration',
             artist: img?.artist?.name || 'Waifu.im Artist',
             sourceUrl: img.source || img.url,
             problemId: problem?.id || 'bonus_roll',
