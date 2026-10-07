@@ -12,6 +12,7 @@ export class TechTreeVisualizer {
     this.onAudioClick = options.onAudioClick || (() => {});
     this.onDomainDrill = options.onDomainDrill || (() => {});
     this.onDomainTable = options.onDomainTable || (() => {});
+    this.onViewModeChange = options.onViewModeChange || (() => {});
   }
 
   /**
@@ -68,23 +69,35 @@ export class TechTreeVisualizer {
     if (domBtn) {
       domBtn.addEventListener('click', () => {
         this.onAudioClick();
-        this.switchViewMode('domains');
+        this.switchViewMode('domains', true);
       });
     }
 
     if (dagBtn) {
       dagBtn.addEventListener('click', () => {
         this.onAudioClick();
-        this.switchViewMode('dag');
+        this.switchViewMode('dag', true);
       });
     }
   }
 
   /**
+   * Sets view mode from URL route without pushing a redundant history entry.
+   */
+  setViewModeFromRoute(mode) {
+    const target = mode === 'dag' ? 'dag' : 'domains';
+    this.switchViewMode(target, false);
+  }
+
+  /**
    * Switches between Core Domains grid view and Factorio Skill DAG view.
    */
-  switchViewMode(mode) {
-    if (this.viewMode === mode) return;
+  switchViewMode(mode, notifyRoute = true) {
+    if (this.viewMode === mode) {
+      if (mode === 'domains') this.renderDomainView();
+      else this.renderTree();
+      return;
+    }
     this.viewMode = mode;
     try {
       localStorage.setItem('atcoder_tree_view', mode);
@@ -113,6 +126,10 @@ export class TechTreeVisualizer {
       if (domContainer) domContainer.style.display = 'none';
       if (dagContainer) dagContainer.style.display = '';
       this.renderTree();
+    }
+
+    if (notifyRoute) {
+      this.onViewModeChange(mode);
     }
   }
 

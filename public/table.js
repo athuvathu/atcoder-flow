@@ -56,6 +56,7 @@ export class PracticeTable {
 
     this.onProblemSelect = options.onProblemSelect || (() => {});
     this.onAudioClick = options.onAudioClick || (() => {});
+    this.onFilterChange = options.onFilterChange || (() => {});
   }
 
   /**
@@ -92,10 +93,10 @@ export class PracticeTable {
           </div>
         </div>
 
-        <div class="filter-group" id="table-domain-chip-group" style="${this.domainFilter !== 'ALL' ? '' : 'display:none;'}">
+        <div class="filter-group" id="table-domain-chip-group" style="${(this.domainFilter !== 'ALL' || this.categoryFilter !== 'ALL') ? '' : 'display:none;'}">
           <span class="active-domain-chip" id="table-active-domain-chip">
             <span id="table-domain-chip-text">DOMAIN: ${this.domainFilter}</span>
-            <button class="btn-clear-domain" id="btn-clear-domain" title="Clear domain filter">×</button>
+            <button class="btn-clear-domain" id="btn-clear-domain" title="Clear active topic/domain filter">×</button>
           </span>
         </div>
 
@@ -158,6 +159,11 @@ export class PracticeTable {
         btn.classList.add('active');
         this.contestFilter = btn.dataset.contest;
         this.applyFilters();
+        this.onFilterChange({
+          domain: this.domainFilter,
+          category: this.categoryFilter,
+          contest: this.contestFilter
+        });
       });
     }
 
@@ -203,14 +209,20 @@ export class PracticeTable {
       });
     }
 
-    // Clear domain button
+    // Clear domain / category button
     const clearDomainBtn = this.container.querySelector('#btn-clear-domain');
     if (clearDomainBtn) {
       clearDomainBtn.addEventListener('click', () => {
         this.onAudioClick();
         this.domainFilter = 'ALL';
+        this.categoryFilter = 'ALL';
         this.applyFilters();
         this.updateActiveDomainChip();
+        this.onFilterChange({
+          domain: 'ALL',
+          category: 'ALL',
+          contest: this.contestFilter
+        });
       });
     }
 
@@ -268,6 +280,27 @@ export class PracticeTable {
   }
 
   /**
+   * Synchronizes filter state from URL hash route without pushing a redundant history state.
+   */
+  setFiltersFromRoute({ domain, category, contest } = {}) {
+    this.domainFilter = domain || 'ALL';
+    this.categoryFilter = category || 'ALL';
+    if (contest) {
+      this.contestFilter = contest.toUpperCase();
+    } else {
+      this.contestFilter = 'ALL';
+    }
+    const contestGroup = this.container.querySelector('#contest-filter-group');
+    if (contestGroup) {
+      contestGroup.querySelectorAll('.contest-btn').forEach(b => {
+        b.classList.toggle('active', b.dataset.contest === this.contestFilter);
+      });
+    }
+    this.updateActiveDomainChip();
+    this.applyFilters();
+  }
+
+  /**
    * Sets category filter from external component (e.g. Tech Tree click).
    * @param {string} category
    */
@@ -298,6 +331,9 @@ export class PracticeTable {
       const d = CORE_DOMAINS.find(item => item.key === this.domainFilter);
       const name = d ? d.name : this.domainFilter;
       textEl.textContent = `DOMAIN: ${name.toUpperCase()}`;
+      group.style.display = 'inline-flex';
+    } else if (this.categoryFilter && this.categoryFilter !== 'ALL') {
+      textEl.textContent = `SKILL: ${this.categoryFilter.replace(/_/g, ' ').toUpperCase()}`;
       group.style.display = 'inline-flex';
     } else {
       group.style.display = 'none';

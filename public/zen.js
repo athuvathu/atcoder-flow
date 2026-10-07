@@ -43,6 +43,7 @@ export class ZenFlowHUD {
     this.onExit = options.onExit || (() => {});
     this.onSolveAC = options.onSolveAC || (() => {});
     this.onGiveUp = options.onGiveUp || (() => {});
+    this.onProblemChange = options.onProblemChange || (() => {});
 
     this.restoreSession();
   }
@@ -127,6 +128,7 @@ export class ZenFlowHUD {
     }
 
     this.render();
+    this.updateStopwatchDisplay();
 
     // Auto-dispatch problem + test cases to local editor / CPH quietly in background
     this.pushToCPH(true);
@@ -138,6 +140,7 @@ export class ZenFlowHUD {
     }
 
     this.persistSession();
+    this.onProblemChange(this.currentProblem);
   }
 
   /**
@@ -259,12 +262,16 @@ export class ZenFlowHUD {
     audioEngine.playClick();
 
     const pauseOverlay = this.container.querySelector('#zen-pause-overlay');
+    const pauseTitle = this.container.querySelector('#zen-pause-title');
     const pauseBtn = this.container.querySelector('#btn-zen-pause');
+    const inlinePauseBtn = this.container.querySelector('#btn-zen-inline-pause');
     const statusTag = this.container.querySelector('#zen-status-indicator');
 
     if (this.isPaused) {
+      if (pauseTitle) pauseTitle.textContent = `[ PAUSED · ${this.formatTime(this.elapsedSeconds)} ]`;
       if (pauseOverlay) pauseOverlay.style.display = 'flex';
       if (pauseBtn) pauseBtn.textContent = '[Space] RESUME';
+      if (inlinePauseBtn) inlinePauseBtn.textContent = '▶ Resume';
       if (statusTag) {
         statusTag.textContent = '[ PAUSED ]';
         statusTag.className = 'status-tag status-paused';
@@ -272,6 +279,7 @@ export class ZenFlowHUD {
     } else {
       if (pauseOverlay) pauseOverlay.style.display = 'none';
       if (pauseBtn) pauseBtn.textContent = '[Space] PAUSE';
+      if (inlinePauseBtn) inlinePauseBtn.textContent = '⏸ Pause';
       if (statusTag) {
         statusTag.textContent = '[ RUNNING ]';
         statusTag.className = 'status-tag status-running';
@@ -279,6 +287,31 @@ export class ZenFlowHUD {
     }
 
     this.persistSession();
+  }
+
+  /**
+   * Resets the stopwatch timer for the active problem back to 00:00.
+   */
+  resetTimer() {
+    audioEngine.playClick();
+    this.elapsedSeconds = 0;
+    if (this.isPaused) {
+      this.isPaused = false;
+      const pauseOverlay = this.container.querySelector('#zen-pause-overlay');
+      const pauseBtn = this.container.querySelector('#btn-zen-pause');
+      const inlinePauseBtn = this.container.querySelector('#btn-zen-inline-pause');
+      const statusTag = this.container.querySelector('#zen-status-indicator');
+      if (pauseOverlay) pauseOverlay.style.display = 'none';
+      if (pauseBtn) pauseBtn.textContent = '[Space] PAUSE';
+      if (inlinePauseBtn) inlinePauseBtn.textContent = '⏸ Pause';
+      if (statusTag) {
+        statusTag.textContent = '[ RUNNING ]';
+        statusTag.className = 'status-tag status-running';
+      }
+    }
+    this.updateStopwatchDisplay();
+    this.persistSession();
+    this.showToast('Stopwatch reset to 00:00', 'info');
   }
 
   /**
@@ -1211,6 +1244,7 @@ export class ZenFlowHUD {
     const atMeta = getAtcoderMeta(this.trainingRating);
     const diffOffset = flowStore.getDiffOffset();
     const contestFilter = flowStore.getContestFilter();
+    const domainFilter = flowStore.getDomainFilter();
 
     this.container.innerHTML = `
       <div class="zen-wrapper">
@@ -1222,11 +1256,40 @@ export class ZenFlowHUD {
         <!-- Paused Screen Scrim -->
         <div id="zen-pause-overlay" class="zen-pause-scrim" style="display: ${this.isPaused ? 'flex' : 'none'};">
           <div class="pause-card">
-            <div class="pause-title">[ PAUSED ]</div>
+            <div id="zen-pause-title" class="pause-title">[ PAUSED · ${this.formatTime(this.elapsedSeconds)} ]</div>
             <div class="pause-subtitle">Timer and metrics are frozen. Take your time.</div>
-            <button id="btn-resume-scrim" class="btn-primary" style="margin-top:16px;">[Space] Resume Practice</button>
+            <div class="pause-scrim-actions">
+              <button id="btn-resume-scrim" class="btn-primary">[Space] ▶ Resume Practice</button>
+              <button id="btn-reset-scrim" class="btn-action">[z] ↺ Reset Timer (00:00)</button>
+              <button id="btn-exit-scrim" class="btn-action-ghost">[Esc] ← Exit Workspace</button>
+            </div>
           </div>
         </div>
+
+        <!-- Top-Left Contextual Navigation & Breadcrumb Bar -->
+        <nav class="zen-nav-bar">
+          <div class="zen-nav-left">
+            <button id="btn-zen-nav-back" class="btn-nav-back" title="Return to previous view [Browser Back / Esc]">
+              ← Back
+            </button>
+            <div class="zen-breadcrumb">
+              <span class="crumb-root" id="zen-crumb-root" title="Return to Practice Table">TABLE</span>
+              <span class="crumb-sep">/</span>
+              <span class="crumb-contest">${contest || 'ATCODER'}</span>
+              <span class="crumb-sep">/</span>
+              <span class="crumb-problem">${escapeHtml(prob.title || prob.id || '')}</span>
+            </div>
+          </div>
+          <div class="zen-nav-right">
+            ${domainFilter ? `
+              <span class="active-domain-chip" id="zen-domain-drill-chip">
+                <span>DRILL: ${domainFilter.replace(/_/g, ' ').toUpperCase()}</span>
+                <button id="btn-zen-clear-domain" class="btn-clear-domain" title="Clear domain drill lock">×</button>
+              </span>
+            ` : ''}
+            <span class="zen-nav-hint">[z] Reset Timer · [Space] Pause · [Esc] Back</span>
+          </div>
+        </nav>
 
         <!-- Terminal Header HUD -->
         <header class="zen-terminal-hud">
@@ -1250,9 +1313,19 @@ export class ZenFlowHUD {
           </div>
 
           <div class="hud-right">
-            <!-- Par Race Stopwatch -->
+            <!-- Par Race Stopwatch & Direct Transport Controls -->
             <div class="stopwatch-cluster">
-              <div id="zen-clock" class="stopwatch-display">${this.formatTime(this.elapsedSeconds)}</div>
+              <div class="stopwatch-top-row">
+                <div id="zen-clock" class="stopwatch-display">${this.formatTime(this.elapsedSeconds)}</div>
+                <div class="stopwatch-controls">
+                  <button id="btn-zen-inline-pause" class="btn-timer-ctrl" title="Pause / Resume Timer [Space]">
+                    ${this.isPaused ? '▶ Resume' : '⏸ Pause'}
+                  </button>
+                  <button id="btn-zen-reset-timer" class="btn-timer-ctrl btn-timer-reset" title="Reset Stopwatch to 00:00 [z]">
+                    ↺ Reset
+                  </button>
+                </div>
+              </div>
               <div class="par-subline">
                 <span>Par: ${this.formatTime(this.parSeconds)}</span>
                 <span id="zen-par-badge" class="par-badge par-ahead">ON PAR</span>
@@ -1292,44 +1365,55 @@ export class ZenFlowHUD {
           <button id="btn-zen-gauntlet" class="btn-mode-gauntlet ${this.gauntletState && this.gauntletState.active ? 'active' : ''}" title="Launch structured 3-problem Gauntlet Run [g]">[g] Gauntlet Run (3-Stage)</button>
         </div>
 
-        <!-- Command & Direct Action Cluster -->
+        <!-- Principled Grouped Action Toolbar -->
         <div class="zen-action-cluster">
           <div class="primary-actions">
-            <button id="btn-zen-cph-push" class="btn-cph-push" title="Push problem & real samples directly to CPH / Editor [c]">
-              [c] CPH PUSH
-            </button>
-            <button id="btn-zen-reader" class="btn-reader-toggle" title="Read problem statement & copy samples [r]">
-              [r] READER
-            </button>
-            <button id="btn-zen-notes" class="btn-notes-toggle" title="Scratchpad & invariants [n]">
-              [n] NOTES
-            </button>
-            <button id="btn-zen-cph" class="btn-cph-open" title="Open official AtCoder problem page in browser [o]">
-              [o] ATCODER
-            </button>
-            <button id="btn-zen-verify" class="btn-solve-ac" title="Verify submission on AtCoder [v]">
-              [v] VERIFY AC
-            </button>
-            <button id="btn-zen-pause" class="btn-action">
-              ${this.isPaused ? '[Space] RESUME' : '[Space] PAUSE'}
-            </button>
+            <div class="action-group">
+              <span class="action-group-label">WORKSPACE</span>
+              <button id="btn-zen-reader" class="btn-reader-toggle" title="Read problem statement & copy samples [r]">
+                [r] READER
+              </button>
+              <button id="btn-zen-cph-push" class="btn-cph-push" title="Push problem & real samples directly to CPH / Editor [c]">
+                [c] CPH PUSH
+              </button>
+              <button id="btn-zen-notes" class="btn-notes-toggle" title="Scratchpad & invariants [n]">
+                [n] NOTES
+              </button>
+              <button id="btn-zen-cph" class="btn-cph-open" title="Open official AtCoder problem page in browser [o]">
+                [o] ATCODER ↗
+              </button>
+            </div>
+
+            <div class="action-group">
+              <span class="action-group-label">VERDICT & TIMER</span>
+              <button id="btn-zen-verify" class="btn-solve-ac" title="Verify submission on AtCoder [v]">
+                [v] VERIFY AC
+              </button>
+              <button id="btn-zen-pause" class="btn-action" title="Pause or Resume Stopwatch [Space]">
+                ${this.isPaused ? '[Space] RESUME' : '[Space] PAUSE'}
+              </button>
+              <button id="btn-zen-reset-bar" class="btn-action" title="Reset Stopwatch to 00:00 [z]">
+                [z] RESET 00:00
+              </button>
+            </div>
           </div>
 
           <div class="secondary-actions">
+            <span class="action-group-label">ASSIST & FLOW</span>
             <button id="btn-zen-reveal-topic" class="btn-action-ghost" title="Anti-spoiler topic reveal [t]">
               [t] TOPIC
             </button>
             <button id="btn-zen-editorial" class="btn-action-ghost" title="Open official editorial [e]">
               [e] EDITORIAL
             </button>
+            <button id="btn-zen-skip" class="btn-action-ghost" title="Skip to next problem [s]">
+              [s] SKIP →
+            </button>
             <button id="btn-zen-giveup" class="btn-action-ghost btn-giveup" title="Surrender problem, reveal solution & record defeat [q]">
               [q] GIVE UP
             </button>
-            <button id="btn-zen-skip" class="btn-action-ghost" title="Skip to next problem [s]">
-              [s] SKIP
-            </button>
-            <button id="btn-zen-back" class="btn-action-ghost" title="Back to Practice Table [Esc]">
-              [Esc] TABLE
+            <button id="btn-zen-back" class="btn-action-ghost" title="Back to previous view [Esc]">
+              [Esc] ← BACK
             </button>
           </div>
         </div>
@@ -1342,7 +1426,7 @@ export class ZenFlowHUD {
         <div class="zen-focus-card">
           <div class="focus-card-header">
             <span>QUICK REFERENCE & ERGONOMICS</span>
-            <span style="color:var(--text-muted)">Press [c] to push to CPH · Press [r] to read statement · Press [v] when accepted</span>
+            <span style="color:var(--text-muted)">Press [r] to read statement · Press [z] to reset timer · Press [v] when accepted</span>
           </div>
           <div class="focus-card-body">
             <div class="quick-link-row">
@@ -1354,22 +1438,22 @@ export class ZenFlowHUD {
               <a href="${editorialUrl}" target="_blank" rel="noopener noreferrer">${editorialUrl}</a>
             </div>
             <div class="keyboard-legend">
-              <span class="key-pill">c</span> Push CPH
               <span class="key-pill">r</span> Reader
+              <span class="key-pill">c</span> Push CPH
               <span class="key-pill">n</span> Notes
-              <span class="key-pill">g</span> Gauntlet
-              <span class="key-pill">+/-</span> Bump Diff
-              <span class="key-pill">x</span> Contest
               <span class="key-pill">Space</span> Pause
-              <span class="key-pill">o</span> AtCoder
+              <span class="key-pill">z</span> Reset Timer
               <span class="key-pill">v</span> Verify AC
               <span class="key-pill">Enter</span> Attest AC
-              <span class="key-pill">t</span> Reveal Topic
+              <span class="key-pill">o</span> AtCoder
+              <span class="key-pill">t</span> Topic
               <span class="key-pill">e</span> Editorial
-              <span class="key-pill">q</span> Give Up
-              <span class="key-pill">1-3</span> Mode
               <span class="key-pill">s</span> Skip
-              <span class="key-pill">Esc</span> Table
+              <span class="key-pill">q</span> Give Up
+              <span class="key-pill">+/-</span> Bump Diff
+              <span class="key-pill">x</span> Contest
+              <span class="key-pill">g</span> Gauntlet
+              <span class="key-pill">Esc</span> Back
             </div>
           </div>
         </div>
@@ -1383,6 +1467,36 @@ export class ZenFlowHUD {
    * Binds UI events and keyboard shortcuts.
    */
   attachEvents() {
+    // Top-left Back button and Breadcrumb Root
+    const btnNavBack = this.container.querySelector('#btn-zen-nav-back');
+    if (btnNavBack) {
+      btnNavBack.addEventListener('click', () => {
+        audioEngine.playClick();
+        this.destroy();
+        this.onExit();
+      });
+    }
+
+    const crumbRoot = this.container.querySelector('#zen-crumb-root');
+    if (crumbRoot) {
+      crumbRoot.addEventListener('click', () => {
+        audioEngine.playClick();
+        this.destroy();
+        this.onExit('table');
+      });
+    }
+
+    const btnClearDomain = this.container.querySelector('#btn-zen-clear-domain');
+    if (btnClearDomain) {
+      btnClearDomain.addEventListener('click', () => {
+        audioEngine.playClick();
+        flowStore.setDomainFilter(null);
+        const chip = this.container.querySelector('#zen-domain-drill-chip');
+        if (chip) chip.remove();
+        this.showToast('Cleared domain drill filter');
+      });
+    }
+
     // Mode switcher buttons
     this.container.querySelectorAll('.btn-mode').forEach(btn => {
       btn.addEventListener('click', (e) => {
@@ -1437,16 +1551,42 @@ export class ZenFlowHUD {
       btnNotes.addEventListener('click', () => this.toggleNotes());
     }
 
-    // Resume button in scrim
+    // Scrim controls (Resume, Reset, Exit)
     const btnResumeScrim = this.container.querySelector('#btn-resume-scrim');
     if (btnResumeScrim) {
       btnResumeScrim.addEventListener('click', () => this.togglePause());
     }
+    const btnResetScrim = this.container.querySelector('#btn-reset-scrim');
+    if (btnResetScrim) {
+      btnResetScrim.addEventListener('click', () => this.resetTimer());
+    }
+    const btnExitScrim = this.container.querySelector('#btn-exit-scrim');
+    if (btnExitScrim) {
+      btnExitScrim.addEventListener('click', () => {
+        audioEngine.playClick();
+        this.destroy();
+        this.onExit();
+      });
+    }
 
-    // Pause button in toolbar
+    // Pause buttons (toolbar & inline stopwatch)
     const btnPause = this.container.querySelector('#btn-zen-pause');
     if (btnPause) {
       btnPause.addEventListener('click', () => this.togglePause());
+    }
+    const btnInlinePause = this.container.querySelector('#btn-zen-inline-pause');
+    if (btnInlinePause) {
+      btnInlinePause.addEventListener('click', () => this.togglePause());
+    }
+
+    // Reset Timer buttons (inline stopwatch & toolbar)
+    const btnResetTimer = this.container.querySelector('#btn-zen-reset-timer');
+    if (btnResetTimer) {
+      btnResetTimer.addEventListener('click', () => this.resetTimer());
+    }
+    const btnResetBar = this.container.querySelector('#btn-zen-reset-bar');
+    if (btnResetBar) {
+      btnResetBar.addEventListener('click', () => this.resetTimer());
     }
 
     // Open AtCoder (in browser)
@@ -1491,7 +1631,7 @@ export class ZenFlowHUD {
       btnSkip.addEventListener('click', () => this.handleSkip('neutral'));
     }
 
-    // Back to table
+    // Back to previous view
     const btnBack = this.container.querySelector('#btn-zen-back');
     if (btnBack) {
       btnBack.addEventListener('click', () => {
@@ -1581,6 +1721,9 @@ export class ZenFlowHUD {
     if (key === ' ' || key === 'p') {
       e.preventDefault();
       this.togglePause();
+    } else if (key === 'z' || key === 'Z') {
+      e.preventDefault();
+      this.resetTimer();
     } else if (key === 'c') {
       e.preventDefault();
       this.pushToCPH();

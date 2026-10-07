@@ -4,11 +4,13 @@ import { PracticeTable } from './table.js';
 import { ZenFlowHUD } from './zen.js';
 import { TechTreeVisualizer } from './tech_tree.js';
 import { atcoderToCodeforces, getAtcoderMeta } from './rating.js';
-import { flowStore, CORE_DOMAINS } from './store.js';
+import { flowStore, CORE_DOMAINS, parseRouteHash, buildRouteHash } from './store.js';
 
 class AtCoderFlowApp {
   constructor() {
     this.currentView = 'table'; // 'table' | 'techtree' | 'zen'
+    this.navHistoryDepth = 0;
+    this._isRouting = false;
     this.userState = {
       handle: 'atrv',
       streak: 0,
@@ -32,7 +34,7 @@ class AtCoderFlowApp {
     this.attachHeaderEvents();
     await this.fetchUserState();
     await this.fetchUserPreferences();
-    this.checkResumeSession();
+    this.initRouter();
   }
 
   setupDOM() {
@@ -53,7 +55,7 @@ class AtCoderFlowApp {
           <div class="view-tabs">
             <button class="tab-btn active" data-view="table">PRACTICE TABLE</button>
             <button class="tab-btn" data-view="techtree">TECH TREE</button>
-            <button class="tab-btn" data-view="zen" id="tab-zen-btn">ZEN MODE</button>
+            <button class="tab-btn" data-view="zen" id="tab-zen-btn">⚡ FLOW WORKSPACE</button>
           </div>
         </div>
 
@@ -111,26 +113,53 @@ class AtCoderFlowApp {
 
     this.table = new PracticeTable(tableEl, {
       onProblemSelect: (prob) => this.openZenMode(prob),
+      onFilterChange: (filters) => {
+        if (!this._isRouting) {
+          this.navigateTo(buildRouteHash({ view: 'table', ...filters }));
+        }
+      },
       onAudioClick: () => audioEngine.playClick()
     });
     this.table.init();
 
     this.zen = new ZenFlowHUD(zenEl, {
-      onSolveAC: (data) => {
+      onSolveAC: () => {
         this.fetchUserState();
         this.table.fetchProblems();
+        this.updateWorkspaceTabUI();
       },
-      onGiveUp: (data) => {
+      onGiveUp: () => {
         this.fetchUserState();
         this.table.fetchProblems();
+        this.updateWorkspaceTabUI();
       },
-      onExit: () => this.switchView('table')
+      onProblemChange: (prob) => {
+        this.updateWorkspaceTabUI();
+        if (prob && prob.id && !this._isRouting) {
+          const targetHash = buildRouteHash({ view: 'zen', problemId: prob.id });
+          if (window.location.hash !== targetHash) {
+            this.navHistoryDepth += 1;
+            window.history.pushState({ depth: this.navHistoryDepth }, '', targetHash);
+          }
+          this.switchViewDOM('zen');
+        }
+      },
+      onExit: (target) => this.handleBackFromZen(target)
     });
 
     this.techTree = new TechTreeVisualizer(treeEl, {
+      onViewModeChange: (mode) => {
+        if (!this._isRouting) {
+          this.navigateTo(buildRouteHash({ view: 'techtree', subView: mode }));
+        }
+      },
       onNodeClick: (node) => {
         this.table.filterByCategory(node.category);
-        this.switchView('table');
+        this.navigateTo(buildRouteHash({
+          view: 'table',
+          category: node.category,
+          contest: this.table.contestFilter
+        }));
         this.showToast(`Filtered practice table to category: ${node.category}`);
       },
       onDomainDrill: (domainKey) => {
@@ -139,7 +168,11 @@ class AtCoderFlowApp {
       },
       onDomainTable: (domainKey) => {
         this.table.filterByDomain(domainKey);
-        this.switchView('table');
+        this.navigateTo(buildRouteHash({
+          view: 'table',
+          domain: domainKey,
+          contest: this.table.contestFilter
+        }));
         const domObj = CORE_DOMAINS.find(d => d.key === domainKey);
         const name = domObj ? domObj.name : domainKey;
         this.showToast(`Filtered practice table to domain: ${name}`);
@@ -214,7 +247,26 @@ class AtCoderFlowApp {
       tab.addEventListener('click', () => {
         audioEngine.playClick();
         const view = tab.dataset.view;
-        this.switchView(view);
+        if (view === 'table') {
+          this.navigateTo(buildRouteHash({
+            view: 'table',
+            domain: this.table.domainFilter,
+            category: this.table.categoryFilter,
+            contest: this.table.contestFilter
+          }));
+        } else if (view === 'techtree') {
+          this.navigateTo(buildRouteHash({
+            view: 'techtree',
+            subView: this.techTree.viewMode || 'domains'
+          }));
+        } else if (view === 'zen') {
+          const activeProb = this.zen.currentProblem || this.getSavedZenProblem();
+          if (activeProb) {
+            this.openZenMode(activeProb);
+          } else {
+            this.startFlowSession('flow');
+          }
+        }
       });
     });
 
@@ -268,7 +320,6 @@ class AtCoderFlowApp {
    */
   startGauntletSession() {
     audioEngine.playChime();
-    this.switchView('zen');
     this.zen.startGauntletRun();
   }
 
@@ -295,7 +346,94 @@ class AtCoderFlowApp {
     }
   }
 
-  switchView(viewName) {
+  initRouter() {
+    window.addEventListener('popstate', () => this.syncRouteFromUrl());
+    window.addEventListener('hashchange', () => this.syncRouteFromUrl());
+
+    if (!window.location.hash || window.location.hash === '#') {
+      window.history.replaceState({ depth: 0 }, '', '#/table');
+    }
+
+    this.syncRouteFromUrl();
+    this.updateWorkspaceTabUI();
+  }
+
+  navigateTo(routeOrHash, replace = false) {
+    const targetHash = typeof routeOrHash === 'object' ? buildRouteHash(routeOrHash) : routeOrHash;
+    if (window.location.hash === targetHash && !replace) {
+      this.syncRouteFromUrl();
+      return;
+    }
+
+    if (replace) {
+      window.history.replaceState({ depth: this.navHistoryDepth }, '', targetHash);
+    } else {
+      this.navHistoryDepth += 1;
+      window.history.pushState({ depth: this.navHistoryDepth }, '', targetHash);
+    }
+
+    this.syncRouteFromUrl();
+  }
+
+  syncRouteFromUrl() {
+    if (this._isRouting) return;
+    this._isRouting = true;
+
+    try {
+      const route = parseRouteHash(window.location.hash);
+
+      if (route.view === 'table') {
+        this.table.setFiltersFromRoute({
+          domain: route.domain,
+          category: route.category,
+          contest: route.contest
+        });
+        this.switchViewDOM('table');
+      } else if (route.view === 'techtree') {
+        this.switchViewDOM('techtree');
+        this.techTree.setViewModeFromRoute(route.subView || 'domains');
+      } else if (route.view === 'zen') {
+        let prob = route.problemId ? flowStore.getProblem(route.problemId) : this.zen.currentProblem;
+        if (!prob) {
+          prob = this.getSavedZenProblem();
+        }
+        if (prob) {
+          this.switchViewDOM('zen');
+          if (!this.zen.currentProblem || this.zen.currentProblem.id !== prob.id) {
+            this.zen.loadProblem(prob);
+          }
+        } else {
+          window.history.replaceState({ depth: this.navHistoryDepth }, '', '#/table');
+          this.switchViewDOM('table');
+        }
+      }
+
+      this.updateWorkspaceTabUI();
+    } finally {
+      this._isRouting = false;
+    }
+  }
+
+  handleBackFromZen(target = 'back') {
+    if (target === 'table') {
+      this.navigateTo(buildRouteHash({
+        view: 'table',
+        domain: this.table.domainFilter,
+        category: this.table.categoryFilter,
+        contest: this.table.contestFilter
+      }));
+      return;
+    }
+
+    if (this.navHistoryDepth > 0) {
+      this.navHistoryDepth = Math.max(0, this.navHistoryDepth - 1);
+      window.history.back();
+    } else {
+      this.navigateTo('#/table');
+    }
+  }
+
+  switchViewDOM(viewName) {
     this.currentView = viewName;
 
     const tableSec = document.getElementById('view-table-section');
@@ -315,15 +453,29 @@ class AtCoderFlowApp {
     }
   }
 
-  openZenMode(problem) {
-    this.switchView('zen');
-    this.zen.loadProblem(problem);
+  switchView(viewName) {
+    if (viewName === 'table') {
+      this.navigateTo('#/table');
+    } else if (viewName === 'techtree') {
+      this.navigateTo(buildRouteHash({ view: 'techtree', subView: this.techTree.viewMode || 'domains' }));
+    } else if (viewName === 'zen') {
+      const prob = this.zen.currentProblem || this.getSavedZenProblem();
+      if (prob) {
+        this.openZenMode(prob);
+      }
+    }
   }
 
-  /**
-   * Resumes active problem from localStorage if page was refreshed during a solve.
-   */
-  async checkResumeSession() {
+  openZenMode(problem) {
+    if (!problem) return;
+    if (this.zen.currentProblem && this.zen.currentProblem.id === problem.id) {
+      this.navigateTo(buildRouteHash({ view: 'zen', problemId: problem.id }));
+    } else {
+      this.zen.loadProblem(problem);
+    }
+  }
+
+  getSavedZenProblem() {
     try {
       const saved = localStorage.getItem('atcoder_flow_zen_state');
       if (saved) {
@@ -331,12 +483,26 @@ class AtCoderFlowApp {
         if (parsed.problem_id) {
           const prob = flowStore.getProblem(parsed.problem_id);
           if (prob && !prob.is_solved) {
-            this.openZenMode(prob);
-            this.showToast(`Resumed active session for ${prob.title || prob.id} (${this.zen.formatTime(parsed.elapsed_seconds || 0)})`);
+            return prob;
           }
         }
       }
     } catch (_) {}
+    return null;
+  }
+
+  updateWorkspaceTabUI() {
+    const zenTab = document.getElementById('tab-zen-btn');
+    if (!zenTab) return;
+
+    const activeProb = this.zen?.currentProblem || this.getSavedZenProblem();
+    if (activeProb && activeProb.id) {
+      zenTab.textContent = `⚡ WORKSPACE [${activeProb.id.toUpperCase()}]`;
+      zenTab.title = `Resume active problem: ${activeProb.title || activeProb.id}`;
+    } else {
+      zenTab.textContent = '⚡ FLOW WORKSPACE';
+      zenTab.title = 'Launch or resume Flow problem workspace';
+    }
   }
 
   toggleMute() {

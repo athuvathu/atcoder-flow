@@ -176,6 +176,64 @@ export function classifyProblemDomain(p) {
   return 'greedy';
 }
 
+/**
+ * Parses a URL hash string into a structured route state object for browser history navigation.
+ */
+export function parseRouteHash(hashStr = '') {
+  const clean = (hashStr || '').replace(/^#\/?/, '').trim();
+  const [pathPart, queryPart] = clean.split('?');
+  const segments = (pathPart || '').split('/').filter(Boolean);
+  const params = new URLSearchParams(queryPart || '');
+
+  const result = {
+    view: 'table',
+    subView: null,
+    problemId: null,
+    domain: params.get('domain') || null,
+    category: params.get('category') || null,
+    contest: params.get('contest') || null
+  };
+
+  const root = (segments[0] || 'table').toLowerCase();
+
+  if (root === 'tree' || root === 'techtree') {
+    result.view = 'techtree';
+    const sub = (segments[1] || '').toLowerCase();
+    result.subView = (sub === 'dag' || sub === 'domains') ? sub : null;
+  } else if (root === 'problem' || root === 'zen') {
+    result.view = 'zen';
+    result.problemId = segments[1] ? decodeURIComponent(segments[1]) : (params.get('id') || null);
+  } else {
+    result.view = 'table';
+  }
+
+  return result;
+}
+
+/**
+ * Builds a canonical URL hash string from a route descriptor.
+ */
+export function buildRouteHash(route = {}) {
+  const view = route.view || 'table';
+  if (view === 'techtree' || view === 'tree') {
+    const sub = route.subView === 'dag' ? 'dag' : 'domains';
+    return `#/tree/${sub}`;
+  }
+  if (view === 'zen' || view === 'problem') {
+    if (route.problemId) {
+      return `#/problem/${encodeURIComponent(route.problemId)}`;
+    }
+    return '#/zen';
+  }
+
+  const params = new URLSearchParams();
+  if (route.domain && route.domain !== 'ALL') params.set('domain', route.domain);
+  if (route.category && route.category !== 'ALL') params.set('category', route.category);
+  if (route.contest && route.contest.toUpperCase() !== 'ALL') params.set('contest', route.contest);
+  const qs = params.toString();
+  return qs ? `#/table?${qs}` : '#/table';
+}
+
 class FlowStoreClass {
   constructor() {
     this.problems = [];

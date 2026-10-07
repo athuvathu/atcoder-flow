@@ -2890,4 +2890,181 @@ body.hide-difficulty .zen-problem-title {
   color: #08080a;
 }
 
+/* ==========================================================================
+   Zen Navigation Bar, Inline Stopwatch Controls & Grouped Action Clusters
+   ========================================================================== */
 
+.zen-nav-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 10px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid #1e1f26;
+  flex-wrap: wrap;
+}
+
+.btn-nav-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #121318;
+  border: 1px solid #282a36;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 5px 12px;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-nav-back:hover {
+  border-color: var(--accent-cyan);
+  color: var(--accent-cyan);
+  background: rgba(66, 224, 224, 0.08);
+}
+
+.zen-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-right: auto;
+}
+
+.zen-breadcrumb .crumb-root {
+  cursor: pointer;
+  color: var(--text-secondary);
+  transition: color 0.15s ease;
+}
+
+.zen-breadcrumb .crumb-root:hover {
+  color: var(--accent-cyan);
+  text-decoration: underline;
+}
+
+.zen-breadcrumb .crumb-sep {
+  color: #383a47;
+}
+
+.zen-breadcrumb .crumb-contest {
+  color: var(--text-muted);
+}
+
+.zen-breadcrumb .crumb-problem {
+  color: var(--accent-cyan);
+  font-weight: 600;
+}
+
+.zen-domain-drill-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 10px;
+  background: rgba(66, 224, 224, 0.08);
+  border: 1px solid rgba(66, 224, 224, 0.35);
+  border-radius: 3px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--accent-cyan);
+}
+
+.btn-chip-clear {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 0 2px;
+  line-height: 1;
+}
+
+.btn-chip-clear:hover {
+  color: #f87171;
+}
+
+.stopwatch-top-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.stopwatch-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.btn-timer-ctrl {
+  background: #121318;
+  border: 1px solid #282a36;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 3px 7px;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  line-height: 1.2;
+}
+
+.btn-timer-ctrl:hover {
+  border-color: var(--accent-cyan);
+  color: var(--accent-cyan);
+  background: rgba(66, 224, 224, 0.08);
+}
+
+.btn-timer-ctrl.btn-timer-reset:hover {
+  border-color: var(--accent-amber);
+  color: var(--accent-amber);
+  background: rgba(255, 184, 54, 0.08);
+}
+
+.pause-scrim-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+.zen-action-cluster {
+  display: flex;
+  align-items: stretch;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.action-group {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 6px 10px;
+  background: #0b0c10;
+  border: 1px solid #1a1b22;
+  border-radius: 3px;
+}
+
+.action-group-label {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  text-transform: uppercase;
+}
+
+.action-group-btns {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
