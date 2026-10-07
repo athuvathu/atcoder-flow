@@ -379,7 +379,7 @@ class FlowStoreClass {
     let cardData = null;
 
     // 1. Primary API: waifu.im (https://api.waifu.im/search)
-    const waifuImUrl = 'https://api.waifu.im/search?is_nsfw=false';
+    const waifuImUrl = 'https://api.waifu.im/search?is_nsfw=true';
     try {
       const res = await fetch(waifuImUrl, {
         headers: { Accept: 'application/json' },
