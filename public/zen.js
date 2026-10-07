@@ -25,6 +25,7 @@ export class ZenFlowHUD {
     this.elapsedSeconds = 0;
     this.isPaused = false;
     this.timerInterval = null;
+    this.verifyPollInterval = null;
     this.sessionSolves = 0;
     this.trainingRating = 1200;
     this.streak = 0;
@@ -45,8 +46,16 @@ export class ZenFlowHUD {
     this.onGiveUp = options.onGiveUp || (() => {});
     this.onProblemChange = options.onProblemChange || (() => {});
     this.onTimerTick = options.onTimerTick || (() => {});
+    this.onOpenRatingModal = options.onOpenRatingModal || (() => {});
 
     this.restoreSession();
+  }
+
+  stopVerifyPoller() {
+    if (this.verifyPollInterval) {
+      clearInterval(this.verifyPollInterval);
+      this.verifyPollInterval = null;
+    }
   }
 
   /**
@@ -90,6 +99,7 @@ export class ZenFlowHUD {
    * Cleanly ends and clears the active problem / practice session without penalty.
    */
   endSession() {
+    this.stopVerifyPoller();
     this.destroy();
     this.currentProblem = null;
     this.elapsedSeconds = 0;
@@ -111,6 +121,7 @@ export class ZenFlowHUD {
    * Initializes Zen Mode with a selected problem, runs the 350ms reel roll.
    */
   async loadProblem(problem, skipReel = false) {
+    this.stopVerifyPoller();
     this.currentProblem = problem;
     this.revealedCategory = false;
     this.primedProblem = null;
@@ -227,6 +238,7 @@ export class ZenFlowHUD {
   }
 
   destroy() {
+    this.stopVerifyPoller();
     if (this.timerInterval) {
       clearInterval(this.timerInterval);
       this.timerInterval = null;
@@ -624,21 +636,50 @@ export class ZenFlowHUD {
     if (splitBtn) splitBtn.style.display = this.isNotesOpen ? 'none' : 'inline-flex';
   }
 
+  toggleBookmark() {
+    if (!this.currentProblem) return;
+    audioEngine.playClick();
+    const added = flowStore.toggleReviewBookmark(this.currentProblem.id);
+    const btn = this.container.querySelector('#btn-zen-bookmark');
+    if (btn) {
+      btn.classList.toggle('active', added);
+      btn.textContent = added ? '[b] ⚑ IN REVIEW' : '[b] ⚑ BOOKMARK';
+    }
+    this.showToast(
+      added
+        ? `Added ${this.currentProblem.id} to Spaced Repetition Review Queue [⚑]`
+        : `Removed ${this.currentProblem.id} from Review Queue`,
+      'info'
+    );
+  }
+
   populateNotesPane(drawer) {
     if (!this.currentProblem) return;
     const probId = this.currentProblem.id;
     drawer.dataset.loadedFor = probId;
     const storageKey = `atcoder_notes_${probId}`;
     const savedNotes = localStorage.getItem(storageKey) || '';
+    const reflectionTags = [
+      '#missed-observation',
+      '#wrong-greedy',
+      '#dp-state',
+      '#tle-complexity',
+      '#edge-case',
+      '#key-invariant'
+    ];
     drawer.innerHTML = `
       <div class="drawer-header">
         <span>SCRATCHPAD & INVARIANTS // ${escapeHtml(probId.toUpperCase())}</span>
         <button id="btn-close-notes" class="btn-drawer-close" title="Close Scratchpad [n / Esc]">✕ [n]</button>
       </div>
+      <div class="notes-tag-bar">
+        <span class="notes-tag-lbl">Quick Tag:</span>
+        ${reflectionTags.map(t => `<button class="btn-reflection-chip" data-tag="${t}" title="Append ${t} to notes">${t}</button>`).join('')}
+      </div>
       <div class="notes-body">
-        <textarea id="zen-scratchpad-input" placeholder="Jot invariants, state transitions, complexity bounds, or edge cases while reading the statement...">${escapeHtml(savedNotes)}</textarea>
+        <textarea id="zen-scratchpad-input" placeholder="Jot invariants, state transitions, complexity bounds, or post-mortem takeaways...">${escapeHtml(savedNotes)}</textarea>
         <div class="notes-footer">
-          <span>Auto-saved locally for ${escapeHtml(probId)}</span>
+          <span>Auto-saved locally for ${escapeHtml(probId)} (visible in Table 📝)</span>
           <span>Press [Esc] to unfocus editor</span>
         </div>
       </div>
@@ -650,6 +691,17 @@ export class ZenFlowHUD {
         localStorage.setItem(storageKey, e.target.value);
       });
     }
+    drawer.querySelectorAll('.btn-reflection-chip').forEach(btn => {
+      btn.addEventListener('click', () => {
+        audioEngine.playClick();
+        const tag = btn.dataset.tag;
+        const updated = flowStore.appendProblemNote(probId, `[${tag}] `);
+        if (textarea) {
+          textarea.value = updated;
+          textarea.focus();
+        }
+      });
+    });
   }
 
   /**
@@ -820,9 +872,11 @@ export class ZenFlowHUD {
   }
 
   /**
-   * Shows inline attestation prompt when Kenkoooo is lagging or shows a non-AC submission.
+   * Shows inline attestation prompt when Kenkoooo is lagging or shows a non-AC submission,
+   * and launches a non-blocking 15-second background auto-poller for up to 3 minutes.
    */
   showAttestModal(checkResult = null) {
+    this.stopVerifyPoller();
     const existing = this.container.querySelector('.attest-prompt-bar');
     if (existing) existing.remove();
 
@@ -842,24 +896,28 @@ export class ZenFlowHUD {
     const bar = document.createElement('div');
     bar.className = 'attest-prompt-bar';
     bar.innerHTML = `
-      <div class="attest-prompt-text">${statusMsg}</div>
+      <div class="attest-prompt-text">
+        ${statusMsg}
+        <span id="attest-autopoll-status" class="autopoll-badge">Auto-checking Kenkoooo in 15s…</span>
+      </div>
       <div class="attest-prompt-actions">
-        <button id="btn-retry-verify" class="btn-action-ghost" title="Re-poll Kenkoooo API [v]">↻ [v] Retry Check</button>
+        <button id="btn-retry-verify" class="btn-action-ghost" title="Re-poll Kenkoooo API now [v]">↻ [v] Check Now</button>
         <button id="btn-confirm-attest" class="btn-attest-confirm" title="Immediately record AC and continue [Enter]">⚡ [Enter] Attest AC & Continue</button>
       </div>
     `;
 
-    const workbenchBar = this.container.querySelector('.zen-workbench-bar');
+    const workbenchBar = this.container.querySelector('.zen-workbench-toolbar') || this.container.querySelector('.zen-workbench-bar');
     if (workbenchBar && workbenchBar.insertAdjacentElement) {
       workbenchBar.insertAdjacentElement('afterend', bar);
     } else {
-      const hero = this.container.querySelector('.zen-hero') || this.container;
-      hero.appendChild(bar);
+      const hero = this.container.querySelector('.zen-wrapper') || this.container;
+      hero.prepend(bar);
     }
 
     const btnConfirm = bar.querySelector('#btn-confirm-attest');
     if (btnConfirm) {
       btnConfirm.addEventListener('click', () => {
+        this.stopVerifyPoller();
         bar.remove();
         this.handleSolve(true);
       });
@@ -867,16 +925,56 @@ export class ZenFlowHUD {
     const btnRetry = bar.querySelector('#btn-retry-verify');
     if (btnRetry) {
       btnRetry.addEventListener('click', () => {
+        this.stopVerifyPoller();
         bar.remove();
         this.handleSolve(false);
       });
     }
+
+    // Start non-blocking 15-second background auto-poller (up to 12 attempts / 3 minutes)
+    let countdown = 15;
+    let attempts = 0;
+    const maxAttempts = 12;
+    const pollStatusEl = bar.querySelector('#attest-autopoll-status');
+
+    this.verifyPollInterval = setInterval(async () => {
+      if (!this.currentProblem || this.currentProblem.id !== probId) {
+        this.stopVerifyPoller();
+        return;
+      }
+      countdown--;
+      if (countdown > 0) {
+        if (pollStatusEl) pollStatusEl.textContent = `Auto-checking Kenkoooo in ${countdown}s…`;
+        return;
+      }
+
+      attempts++;
+      countdown = 15;
+      if (pollStatusEl) pollStatusEl.textContent = `Polling Kenkoooo (${attempts}/${maxAttempts})…`;
+
+      try {
+        const res = await flowStore.verifyProblemAC(probId);
+        if (res && res.verified) {
+          this.stopVerifyPoller();
+          bar.remove();
+          // Trigger verified solve
+          this.handleSolve(true);
+          return;
+        }
+      } catch (_) {}
+
+      if (attempts >= maxAttempts) {
+        this.stopVerifyPoller();
+        if (pollStatusEl) pollStatusEl.textContent = `Auto-poll paused (click ↻ Check Now or ⚡ Attest AC)`;
+      }
+    }, 1000);
   }
 
   /**
    * Terminal-grade solve verdict card with AtCoder and Codeforces performance metrics.
    */
   showJackpotCelebration(data) {
+    this.stopVerifyPoller();
     try {
       if (typeof audioEngine.playChime === 'function') audioEngine.playChime();
       if (data.is_critical && typeof audioEngine.playJackpot === 'function') {
@@ -916,6 +1014,14 @@ export class ZenFlowHUD {
       ? `<div class="surge-badge clutch">[ CLUTCH AC: PAR WINDOW LOCKED ]</div>`
       : '';
 
+    const redemptionBannerHtml = data.was_redemption
+      ? `<div class="surge-badge critical">[ ★ UP-SOLVED REDEMPTION // GRADUATED FROM REVIEW QUEUE (+50% XP) ]</div>`
+      : '';
+
+    const frontierBannerHtml = data.is_frontier_leap
+      ? `<div class="surge-badge clutch">[ ⚡ FRONTIER RATING LEAP: +${data.rating_delta} TR JUMP ]</div>`
+      : '';
+
     const gauntletBannerHtml = isGauntlet
       ? `<div class="gauntlet-stage-banner">[ GAUNTLET STAGE ${this.gauntletState.stage}/3 CLEARED! ]</div>`
       : '';
@@ -938,6 +1044,8 @@ export class ZenFlowHUD {
     overlay.innerHTML = `
       <div class="jackpot-card">
         <div class="jackpot-verdict">[ ACCEPTED ]</div>
+        ${redemptionBannerHtml}
+        ${frontierBannerHtml}
         ${surgeBannerHtml}
         ${gauntletBannerHtml}
         <div class="jackpot-task">${this.currentProblem.title || this.currentProblem.id}</div>
@@ -1017,31 +1125,56 @@ export class ZenFlowHUD {
   }
 
   /**
-   * Initiates a structured 3-problem Gauntlet Run (Warmup -> Flow -> Boss).
+   * Initiates a structured 3-problem Gauntlet Run supporting custom presets.
    */
-  startGauntletRun() {
+  startGauntletRun(presetOverride = null) {
+    if (presetOverride) {
+      flowStore.setGauntletPreset(presetOverride);
+    }
+    const preset = flowStore.getGauntletPreset();
     this.gauntletState = {
       active: true,
       stage: 1,
+      preset,
       solves: [],
       startTime: Date.now()
     };
     audioEngine.playChime();
-    const offset = flowStore.getDiffOffset();
-    const contest = flowStore.getContestFilter().toUpperCase();
-    const offsetStr = offset !== 0 ? ` · Bump: ${offset > 0 ? '+' : ''}${offset}` : '';
-    this.showToast(`Starting 3-Problem Flow Gauntlet [Stage 1 Warmup] · Contest: ${contest}${offsetStr}...`, 'info');
+    const presetLabels = {
+      escalation: 'Escalation (-150 → Par → +200)',
+      hard_push: 'Hard Push (+150 → +275 → +400)',
+      arc_deep: 'ARC Deep Think (3 ARC Tasks)',
+      redemption: 'Review Redemption (Up-Solve Queue)'
+    };
+    this.showToast(`Starting Gauntlet [${presetLabels[preset] || 'Escalation'} · Stage 1/3]...`, 'info');
     this.fetchGauntletStage(1);
   }
 
   /**
-   * Fetches problem tailored for current gauntlet stage.
+   * Fetches problem tailored for current gauntlet stage and active preset.
    */
   async fetchGauntletStage(stageNum) {
-    const modes = { 1: 'warmup', 2: 'flow', 3: 'boss' };
-    const mode = modes[stageNum] || 'flow';
+    const preset = this.gauntletState?.preset || flowStore.getGauntletPreset() || 'escalation';
+    const baseOffset = flowStore.getDiffOffset();
+    let mode = 'flow';
+    const opts = { excludeId: this.currentProblem?.id };
+
+    if (preset === 'hard_push') {
+      if (stageNum === 1) { mode = 'reach'; }
+      else if (stageNum === 2) { mode = 'boss'; }
+      else { mode = 'boss'; opts.diffOffset = baseOffset + 150; }
+    } else if (preset === 'arc_deep') {
+      opts.contestFilter = 'arc';
+      mode = stageNum === 1 ? 'flow' : stageNum === 2 ? 'reach' : 'boss';
+    } else if (preset === 'redemption') {
+      mode = 'review';
+    } else {
+      const modes = { 1: 'warmup', 2: 'flow', 3: 'boss' };
+      mode = modes[stageNum] || 'flow';
+    }
+
     try {
-      const prob = flowStore.getNextFlowProblem(mode);
+      const prob = flowStore.getNextFlowProblem(mode, opts);
       if (prob && prob.id) {
         this.loadProblem(prob);
       } else {
@@ -1189,7 +1322,7 @@ export class ZenFlowHUD {
 
   /**
    * Prompts user to confirm giving up, pauses clock, reveals solution/editorial,
-   * recalibrates rating honestly, and records defeat.
+   * allows 1-click post-mortem failure reflection tags, and records defeat.
    */
   handleGiveUp() {
     if (this.container.querySelector('.zen-giveup-overlay')) return;
@@ -1200,6 +1333,13 @@ export class ZenFlowHUD {
     const prob = this.currentProblem || {};
     const editorialUrl = prob.editorial_url || `https://atcoder.jp/contests/${prob.contest_id}/editorial`;
     const isGauntlet = Boolean(this.gauntletState && this.gauntletState.active);
+    const reflectionTags = [
+      '#missed-observation',
+      '#wrong-greedy',
+      '#dp-state',
+      '#tle-complexity',
+      '#edge-case'
+    ];
 
     const overlay = document.createElement('div');
     overlay.className = 'zen-jackpot-overlay zen-giveup-overlay';
@@ -1233,7 +1373,14 @@ export class ZenFlowHUD {
           </div>
           <div class="giveup-impact-row">
             <span>SPACED REPETITION:</span>
-            <span style="color:var(--text-secondary)">QUEUED FOR REVIEW</span>
+            <span style="color:var(--accent-amber)">⚑ QUEUED IN REVIEW LIST</span>
+          </div>
+        </div>
+
+        <div class="giveup-reflection-box">
+          <div class="editorial-hint-text">1-Click Post-Mortem Tag (saves to problem Scratchpad 📝):</div>
+          <div class="giveup-reflection-chips">
+            ${reflectionTags.map(t => `<button class="btn-reflection-chip" data-tag="${t}">${t}</button>`).join('')}
           </div>
         </div>
 
@@ -1256,6 +1403,18 @@ export class ZenFlowHUD {
     `;
 
     this.container.appendChild(overlay);
+
+    overlay.querySelectorAll('.btn-reflection-chip').forEach(btn => {
+      btn.addEventListener('click', () => {
+        audioEngine.playClick();
+        btn.classList.toggle('active');
+        const tag = btn.dataset.tag;
+        if (prob.id) {
+          flowStore.appendProblemNote(prob.id, `[Post-Mortem: ${tag}] `);
+          this.showToast(`Logged ${tag} to ${prob.id} Scratchpad`, 'info');
+        }
+      });
+    });
 
     const confirmBtn = overlay.querySelector('#btn-giveup-confirm');
     const cancelBtn = overlay.querySelector('#btn-giveup-cancel');
@@ -1350,6 +1509,9 @@ export class ZenFlowHUD {
     const diffOffset = flowStore.getDiffOffset();
     const contestFilter = flowStore.getContestFilter();
     const domainFilter = flowStore.getDomainFilter();
+    const gauntletPreset = flowStore.getGauntletPreset();
+    const inReview = prob.id ? flowStore.isInReviewQueue(prob.id) : false;
+    const revCount = flowStore.getReviewQueueCount();
 
     this.container.innerHTML = `
       <div class="zen-wrapper">
@@ -1402,6 +1564,7 @@ export class ZenFlowHUD {
               <button class="btn-mode ${this.activeMode === 'speed' ? 'active' : ''}" data-mode="speed" title="Fast fluency drills (-200) [1]">[1] Speed</button>
               <button class="btn-mode ${this.activeMode === 'flow' ? 'active' : ''}" data-mode="flow" title="Optimal challenge at Par rating [2]">[2] Flow</button>
               <button class="btn-mode ${this.activeMode === 'reach' ? 'active' : ''}" data-mode="reach" title="Growth breakthrough challenge (+150) [3]">[3] Reach</button>
+              <button class="btn-mode ${this.activeMode === 'review' ? 'active' : ''}" data-mode="review" title="Pull from Spaced Repetition Review Queue [4]">[4] ⚑ Review (${revCount})</button>
               <span class="mode-sep">·</span>
               <div class="contest-btn-group-zen">
                 <button class="btn-contest-opt ${contestFilter === 'all' ? 'active' : ''}" data-contest="all" title="All Golden Era [x]">ALL</button>
@@ -1415,6 +1578,12 @@ export class ZenFlowHUD {
                 <span id="zen-bump-val" class="bump-val-pill ${diffOffset > 0 ? 'bump-pos' : diffOffset < 0 ? 'bump-neg' : ''}">${diffOffset > 0 ? '+' : ''}${diffOffset}</span>
                 <button id="btn-bump-up" class="btn-bump-btn">+50</button>
               </div>
+              <select id="zen-gauntlet-preset" class="gauntlet-preset-select" title="Gauntlet Mode Preset">
+                <option value="escalation" ${gauntletPreset === 'escalation' ? 'selected' : ''}>Escalation</option>
+                <option value="hard_push" ${gauntletPreset === 'hard_push' ? 'selected' : ''}>Hard Push (+150..+400)</option>
+                <option value="arc_deep" ${gauntletPreset === 'arc_deep' ? 'selected' : ''}>ARC Deep Think</option>
+                <option value="redemption" ${gauntletPreset === 'redemption' ? 'selected' : ''}>Review Redemption</option>
+              </select>
               <button id="btn-zen-gauntlet" class="btn-mode-gauntlet ${this.gauntletState && this.gauntletState.active ? 'active' : ''}" title="Launch 3-Stage Gauntlet [g]">[g] Gauntlet</button>
             </div>
           </div>
@@ -1437,7 +1606,10 @@ export class ZenFlowHUD {
               <span id="zen-active-contest-pill" class="contest-badge-pill">${contestFilter.toUpperCase()}</span>
               ${diffOffset !== 0 ? `<span id="zen-active-bump-pill" class="diff-bump-pill ${diffOffset > 0 ? 'bump-pos' : 'bump-neg'}">${diffOffset > 0 ? '+' : ''}${diffOffset} BUMP</span>` : `<span id="zen-active-bump-pill" class="diff-bump-pill" style="display:none;"></span>`}
               <span id="zen-topic-tag" class="topic-badge" style="cursor:pointer;" title="Click or press [t] to reveal topic">TOPIC: [HIDDEN // 't']</span>
-              <span class="rating-badge">PERF: <strong style="color:${atMeta.color};">${this.trainingRating}</strong> <span style="color:${cfMeta.color}; margin-left:4px;">[CF ${cfMeta.cfRating} ${cfMeta.title}]</span></span>
+              <span id="zen-rating-badge" class="rating-badge editable-rating-badge" style="cursor:pointer;" title="Click to manually set Practice Rating or Auto-Calibrate">
+                RATING: <strong style="color:${atMeta.color};">${this.trainingRating} ✎</strong>
+                <span style="color:${cfMeta.color}; margin-left:4px;">[CF ${cfMeta.cfRating} ${cfMeta.title}]</span>
+              </span>
             </div>
           </div>
 
@@ -1480,6 +1652,9 @@ export class ZenFlowHUD {
             </button>
             <button id="btn-zen-notes" class="btn-pane-toggle ${this.isNotesOpen ? 'active' : ''}" title="Toggle Side-by-Side Scratchpad Pane [n]">
               [n] SCRATCHPAD
+            </button>
+            <button id="btn-zen-bookmark" class="btn-action-ghost ${inReview ? 'active' : ''}" title="Bookmark / Queue problem in Spaced Repetition Review List [b]">
+              ${inReview ? '[b] ⚑ IN REVIEW' : '[b] ⚑ BOOKMARK'}
             </button>
             <span class="toolbar-divider"></span>
             <button id="btn-zen-cph-push" class="btn-cph-push" title="Push problem & real samples to local CPH / Competitive Companion [c]">
@@ -1533,11 +1708,12 @@ export class ZenFlowHUD {
             <span><kbd>Space</kbd> Pause</span>
             <span><kbd>z</kbd> Reset 00:00</span>
             <span><kbd>w</kbd> End Session</span>
+            <span><kbd>b</kbd> Bookmark ⚑</span>
             <span><kbd>r</kbd> Statement</span>
             <span><kbd>n</kbd> Split Notes</span>
             <span><kbd>v</kbd> Verify AC</span>
             <span><kbd>a</kbd> Attest AC</span>
-            <span><kbd>?</kbd> All Shortcuts</span>
+            <span><kbd>Ctrl+K</kbd> Palette</span>
           </div>
           <button id="btn-zen-end-session" class="btn-end-session-subtle" title="End and clear active problem timer [w]">
             ⏹ End Session
@@ -1592,10 +1768,34 @@ export class ZenFlowHUD {
       });
     }
 
+    // Editable rating badge inside Workbench
+    const ratingBadge = this.container.querySelector('#zen-rating-badge');
+    if (ratingBadge) {
+      ratingBadge.addEventListener('click', () => {
+        audioEngine.playClick();
+        this.onOpenRatingModal();
+      });
+    }
+
+    // Bookmark toggle
+    const btnBookmark = this.container.querySelector('#btn-zen-bookmark');
+    if (btnBookmark) {
+      btnBookmark.addEventListener('click', () => this.toggleBookmark());
+    }
+
+    // Gauntlet preset selector
+    const presetSelect = this.container.querySelector('#zen-gauntlet-preset');
+    if (presetSelect) {
+      presetSelect.addEventListener('change', (e) => {
+        audioEngine.playClick();
+        flowStore.setGauntletPreset(e.target.value);
+      });
+    }
+
     // Mode switcher buttons
     this.container.querySelectorAll('.btn-mode').forEach(btn => {
       btn.addEventListener('click', (e) => {
-        const mode = e.target.dataset.mode;
+        const mode = e.currentTarget.dataset.mode;
         if (mode) this.setPracticeMode(mode);
       });
     });
@@ -1603,7 +1803,7 @@ export class ZenFlowHUD {
     // Contest filter buttons
     this.container.querySelectorAll('.btn-contest-opt').forEach(btn => {
       btn.addEventListener('click', (e) => {
-        const contest = e.target.dataset.contest;
+        const contest = e.currentTarget.dataset.contest;
         if (contest) this.setContestFilter(contest);
       });
     });
@@ -1731,7 +1931,7 @@ export class ZenFlowHUD {
     const activeEl = document.activeElement;
 
     // Guard: allow typing in scratchpad textarea without triggering hotkeys
-    if (activeEl && (activeEl.tagName === 'TEXTAREA' || activeEl.tagName === 'INPUT')) {
+    if (activeEl && (activeEl.tagName === 'TEXTAREA' || activeEl.tagName === 'INPUT' || activeEl.tagName === 'SELECT')) {
       if (key === 'Escape') {
         e.preventDefault();
         activeEl.blur();
@@ -1809,6 +2009,9 @@ export class ZenFlowHUD {
       audioEngine.playClick();
       this.endSession();
       this.onExit('table');
+    } else if (key === 'b' || key === 'B') {
+      e.preventDefault();
+      this.toggleBookmark();
     } else if (key === 'c') {
       e.preventDefault();
       this.pushToCPH();
@@ -1830,6 +2033,9 @@ export class ZenFlowHUD {
     } else if (key === '3') {
       e.preventDefault();
       this.setPracticeMode('reach');
+    } else if (key === '4') {
+      e.preventDefault();
+      this.setPracticeMode('review');
     } else if (key === 'o') {
       e.preventDefault();
       this.openOfficialTask();

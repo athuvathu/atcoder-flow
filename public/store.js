@@ -257,7 +257,9 @@ class FlowStoreClass {
       solved_count: 0,
       last_solve_epoch: 0,
       solved_ids: [],
-      preferences: { muted: false, mode: 'flow' }
+      review_list: [],
+      solve_log: [],
+      preferences: { muted: false, mode: 'flow', gauntlet_preset: 'escalation' }
     };
   }
 
@@ -307,6 +309,8 @@ class FlowStoreClass {
       }
     } catch (_) {}
 
+    if (!Array.isArray(this.userState.review_list)) this.userState.review_list = [];
+    if (!Array.isArray(this.userState.solve_log)) this.userState.solve_log = [];
     this.solvedSet = new Set(this.userState.solved_ids || []);
     this.userState.solved_count = this.solvedSet.size;
   }
@@ -320,7 +324,11 @@ class FlowStoreClass {
   }
 
   getUserState() {
-    return { ...this.userState, solved_count: this.solvedSet.size };
+    return {
+      ...this.userState,
+      solved_count: this.solvedSet.size,
+      review_count: (this.userState.review_list || []).length
+    };
   }
 
   setHandle(newHandle) {
@@ -330,6 +338,103 @@ class FlowStoreClass {
     return this.getUserState();
   }
 
+  /**
+   * Directly sets the user's Practice / Training Rating (100 - 3600) so they never have to grind
+   * easy problems to reach their actual capability zone.
+   */
+  setTrainingRating(newTr) {
+    const prevTr = this.userState.training_rating || 1200;
+    const clamped = Math.max(100, Math.min(3600, Math.round(Number(newTr) || 1200)));
+    this.userState.training_rating = clamped;
+    if (!Array.isArray(this.userState.solve_log)) this.userState.solve_log = [];
+    this.userState.solve_log.push({
+      id: 'manual_set',
+      ts: Math.floor(Date.now() / 1000),
+      diff: clamped,
+      elapsed: 0,
+      tr_before: prevTr,
+      tr_after: clamped,
+      delta: clamped - prevTr,
+      status: 'manual_tr'
+    });
+    if (this.userState.solve_log.length > 100) {
+      this.userState.solve_log = this.userState.solve_log.slice(-100);
+    }
+    this.saveToLocalStorage();
+    return {
+      ...this.getUserState(),
+      previous_tr: prevTr,
+      new_tr: clamped,
+      cf: atcoderToCodeforces(clamped)
+    };
+  }
+
+  /**
+   * Empirically calibrates Training Rating from the user's actual solved problems (70th percentile
+   * of their top 15 solved difficulties, ignoring trivial warmups).
+   */
+  autoCalibrateRatingFromSolved() {
+    const prevTr = this.userState.training_rating || 1200;
+    const solvedDiffs = [];
+
+    for (const id of this.solvedSet) {
+      const p = this.problemMap.get(id);
+      const d = p ? (p.clipped_difficulty ?? p.difficulty) : null;
+      if (p && Number.isFinite(d) && d > 0) {
+        solvedDiffs.push({ id: p.id, title: p.title, diff: d });
+      }
+    }
+
+    if (solvedDiffs.length === 0) {
+      return {
+        calibrated: false,
+        reason: 'No solved problems found in local state. Click [v] SYNC first or set rating manually.',
+        previous_tr: prevTr,
+        new_tr: prevTr,
+        newTr: prevTr,
+        sample_size: 0,
+        sampleSize: 0,
+        topPeak: 0,
+        top_problems: [],
+        state: this.getUserState()
+      };
+    }
+
+    solvedDiffs.sort((a, b) => b.diff - a.diff);
+    const topSlice = solvedDiffs.slice(0, Math.min(15, solvedDiffs.length));
+    // Anchor to 30% index from top of topSlice (70th percentile of top solved tasks)
+    const idx = Math.min(topSlice.length - 1, Math.floor(topSlice.length * 0.3));
+    const empiricalTr = Math.max(400, Math.min(3200, Math.round(topSlice[idx].diff / 10) * 10));
+    const topPeak = Math.round(topSlice[0].diff);
+
+    this.userState.training_rating = empiricalTr;
+    if (!Array.isArray(this.userState.solve_log)) this.userState.solve_log = [];
+    this.userState.solve_log.push({
+      id: 'auto_calibrate',
+      ts: Math.floor(Date.now() / 1000),
+      diff: empiricalTr,
+      elapsed: 0,
+      tr_before: prevTr,
+      tr_after: empiricalTr,
+      delta: empiricalTr - prevTr,
+      status: 'auto_calibrate'
+    });
+    this.saveToLocalStorage();
+
+    return {
+      calibrated: true,
+      previous_tr: prevTr,
+      new_tr: empiricalTr,
+      newTr: empiricalTr,
+      sample_size: topSlice.length,
+      sampleSize: topSlice.length,
+      topPeak,
+      top_problems: topSlice.slice(0, 5),
+      cf: atcoderToCodeforces(empiricalTr),
+      state: this.getUserState()
+    };
+  }
+
   saveUserPreferences(prefs) {
     this.userState.preferences = { ...this.userState.preferences, ...prefs };
     this.saveToLocalStorage();
@@ -337,6 +442,18 @@ class FlowStoreClass {
 
   getUserPreferences() {
     return this.userState.preferences || {};
+  }
+
+  getGauntletPreset() {
+    return this.userState.preferences?.gauntlet_preset || 'escalation';
+  }
+
+  setGauntletPreset(preset = 'escalation') {
+    const valid = ['escalation', 'hard_push', 'arc_deep', 'redemption'].includes(preset)
+      ? preset
+      : 'escalation';
+    this.saveUserPreferences({ gauntlet_preset: valid });
+    return valid;
   }
 
   getDiffOffset() {
@@ -379,11 +496,86 @@ class FlowStoreClass {
     return this.solvedSet.has(problemId);
   }
 
+  isInReviewQueue(problemId) {
+    return Array.isArray(this.userState.review_list) && this.userState.review_list.includes(problemId);
+  }
+
+  getReviewQueueCount() {
+    return Array.isArray(this.userState.review_list) ? this.userState.review_list.length : 0;
+  }
+
+  toggleReviewBookmark(problemId) {
+    if (!problemId) return false;
+    if (!Array.isArray(this.userState.review_list)) {
+      this.userState.review_list = [];
+    }
+    const idx = this.userState.review_list.indexOf(problemId);
+    let added = false;
+    if (idx >= 0) {
+      this.userState.review_list.splice(idx, 1);
+      added = false;
+    } else {
+      this.userState.review_list.push(problemId);
+      added = true;
+    }
+    this.saveToLocalStorage();
+    return added;
+  }
+
+  hasNotes(problemId) {
+    if (!problemId || typeof localStorage === 'undefined') return false;
+    try {
+      const val = localStorage.getItem(`atcoder_notes_${problemId}`);
+      return Boolean(val && val.trim().length > 0);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  getNotesSnippet(problemId, maxLen = 110) {
+    if (!problemId || typeof localStorage === 'undefined') return '';
+    try {
+      const val = (localStorage.getItem(`atcoder_notes_${problemId}`) || '').trim();
+      if (!val) return '';
+      const oneLine = val.replace(/\s+/g, ' ');
+      return oneLine.length > maxLen ? oneLine.slice(0, maxLen) + '…' : oneLine;
+    } catch (_) {
+      return '';
+    }
+  }
+
+  appendProblemNote(problemId, noteTag) {
+    if (!problemId || !noteTag || typeof localStorage === 'undefined') return '';
+    try {
+      const key = `atcoder_notes_${problemId}`;
+      const existing = localStorage.getItem(key) || '';
+      if (existing.includes(noteTag)) return existing;
+      const updated = existing.trim()
+        ? `${existing.trim()}\n${noteTag}`
+        : `${noteTag}\n`;
+      localStorage.setItem(key, updated);
+      return updated;
+    } catch (_) {
+      return '';
+    }
+  }
+
   getProblems(filters = {}) {
     let result = this.problems.map(p => ({
       ...p,
-      is_solved: this.isSolved(p.id)
+      is_solved: this.isSolved(p.id),
+      in_review: this.isInReviewQueue(p.id),
+      has_notes: this.hasNotes(p.id),
+      notes_snippet: this.getNotesSnippet(p.id)
     }));
+
+    if (filters.reviewOnly) {
+      result = result.filter(p => p.in_review);
+    }
+
+    if (filters.notesOnly) {
+      result = result.filter(p => p.has_notes);
+    }
 
     if (filters.domain && filters.domain !== 'ALL') {
       result = result.filter(p => classifyProblemDomain(p) === filters.domain);
@@ -488,6 +680,16 @@ class FlowStoreClass {
     const contestFilter = (options.contestFilter !== undefined) ? options.contestFilter.toLowerCase() : this.getContestFilter();
     const domainFilter = (options.domainFilter !== undefined) ? options.domainFilter : this.getDomainFilter();
     const excludeId = options.excludeId || null;
+
+    // Special mode: 'review' pulls directly from the user's Spaced Repetition Review Queue (review_list)
+    if (mode === 'review') {
+      const reviewIds = (this.userState.review_list || []).filter(id => id !== excludeId);
+      if (reviewIds.length > 0) {
+        const chosenId = reviewIds[0];
+        const prob = this.getProblem(chosenId);
+        if (prob) return { ...prob, in_review: true };
+      }
+    }
 
     const tr = Math.max(400, rawTr + diffOffset);
 
@@ -610,8 +812,8 @@ class FlowStoreClass {
   }
 
   /**
-   * Records AC solve, computes Par pacing bonuses and Speed Surge dynamics.
-   * Calibrated with honest, deflated CP performance and Elo-principled rating delta.
+   * Records AC solve, computes Par pacing bonuses, Fast Frontier Rating Leap for above-TR solves,
+   * Up-Solve Redemption graduation from review_list, and solve_log telemetry.
    */
   recordSolve(problemId, elapsedSeconds, isAttested = true) {
     const problem = this.getProblem(problemId) || { id: problemId, clipped_difficulty: 1200 };
@@ -622,15 +824,12 @@ class FlowStoreClass {
     // Pacing vs Par: measured speed adjustment anchored to difficulty
     let speedBonus = 0;
     if (elapsedSeconds <= parSeconds) {
-      // Ahead of par: up to +75 pts for solving significantly faster than par
       speedBonus = Math.round(((parSeconds - elapsedSeconds) / parSeconds) * 75);
     } else {
-      // Slower than par: realistic pacing penalty up to -120 pts
       speedBonus = Math.max(-120, Math.round(((parSeconds - elapsedSeconds) / parSeconds) * 80));
     }
 
     const isCritical = elapsedSeconds <= 0.5 * parSeconds;
-    // Speed Surge bonus for blistering execution: max +25 pts
     const speedSurgeBonus = isCritical
       ? Math.min(25, Math.floor(((0.5 * parSeconds - elapsedSeconds) / (0.5 * parSeconds)) * 25))
       : 0;
@@ -641,7 +840,7 @@ class FlowStoreClass {
     const solvePerformance = Math.max(400, Math.round(baseDiff + speedBonus + speedSurgeBonus));
     const cfPerf = atcoderToCodeforces(solvePerformance);
 
-    // Elo-principled Training Rating progression
+    // Elo-principled Training Rating progression + Fast Frontier Leap when solving above-TR problems
     const currentTr = this.userState.training_rating || 1200;
     const expectedScore = 1 / (1 + Math.pow(10, (currentTr - baseDiff) / 400));
     const baseDelta = Math.max(1, Math.round(16 * (1 - expectedScore)));
@@ -657,16 +856,60 @@ class FlowStoreClass {
       speedDeltaBonus = -1;
     }
 
-    const ratingDelta = Math.max(1, Math.min(22, baseDelta + speedDeltaBonus));
+    let ratingDelta = Math.max(1, Math.min(22, baseDelta + speedDeltaBonus));
+    let isFrontierLeap = false;
+
+    // Fast Frontier Leap: if problem difficulty is >100 above current TR, leap 35% of the gap
+    // so capable users never have to grind dozens of easy problems to reach their true rating.
+    if (baseDiff > currentTr + 100) {
+      const frontierLeap = Math.round((baseDiff - currentTr) * 0.35) + Math.max(0, speedDeltaBonus);
+      if (frontierLeap > ratingDelta) {
+        ratingDelta = Math.min(350, frontierLeap);
+        isFrontierLeap = true;
+      }
+    }
+
+    // Check if this solve graduates a problem from the Spaced Repetition Review Queue
+    let wasRedemption = false;
+    if (Array.isArray(this.userState.review_list)) {
+      const revIdx = this.userState.review_list.indexOf(problemId);
+      if (revIdx >= 0) {
+        this.userState.review_list.splice(revIdx, 1);
+        wasRedemption = true;
+      }
+    }
 
     // Update state
     this.userState.training_rating = Math.round(this.userState.training_rating + ratingDelta);
     this.userState.streak = (this.userState.streak || 0) + 1;
     this.userState.multiplier = Math.min(4, 1 + Math.floor(this.userState.streak / 5) * 0.25);
-    const xpGained = Math.round((baseDiff / 10) * this.userState.multiplier);
+    const xpGained = Math.round((baseDiff / 10) * this.userState.multiplier * (wasRedemption ? 1.5 : 1));
     this.userState.xp = (this.userState.xp || 0) + xpGained;
     this.userState.session_solves = (this.userState.session_solves || 0) + 1;
     this.userState.last_solve_epoch = Math.floor(Date.now() / 1000);
+
+    // Append to empirical solve_log (capped at 100 entries)
+    if (!Array.isArray(this.userState.solve_log)) {
+      this.userState.solve_log = [];
+    }
+    this.userState.solve_log.push({
+      id: problemId,
+      title: problem.title || problemId,
+      diff: baseDiff,
+      domain: classifyProblemDomain(problem),
+      ts: Date.now(),
+      elapsed: elapsedSeconds,
+      par: parSeconds,
+      perf: solvePerformance,
+      tr_after: this.userState.training_rating,
+      delta: ratingDelta,
+      status: 'ac',
+      was_redemption: wasRedemption,
+      is_frontier_leap: isFrontierLeap
+    });
+    if (this.userState.solve_log.length > 100) {
+      this.userState.solve_log = this.userState.solve_log.slice(-100);
+    }
 
     this.solvedSet.add(problemId);
     this.saveToLocalStorage();
@@ -683,6 +926,8 @@ class FlowStoreClass {
       training_rating: this.userState.training_rating,
       cf_training_rating: cfTr.cfRating,
       rating_delta: ratingDelta,
+      is_frontier_leap: isFrontierLeap,
+      was_redemption: wasRedemption,
       par_seconds: parSeconds,
       elapsed_seconds: elapsedSeconds,
       beat_par: elapsedSeconds <= parSeconds,
@@ -727,6 +972,7 @@ class FlowStoreClass {
    * tags problem for spaced repetition review, and primes next flow problem.
    */
   recordGiveUp(problemId, elapsedSeconds = 0) {
+    const problem = this.getProblem(problemId) || { id: problemId, clipped_difficulty: 1200 };
     const currentTr = this.userState.training_rating || 1200;
     const delta = -20;
     const newTr = Math.max(400, Math.min(3200, currentTr + delta));
@@ -743,6 +989,26 @@ class FlowStoreClass {
       this.userState.review_list.push(problemId);
     }
 
+    if (!Array.isArray(this.userState.solve_log)) {
+      this.userState.solve_log = [];
+    }
+    this.userState.solve_log.push({
+      id: problemId,
+      title: problem.title || problemId,
+      diff: problem.clipped_difficulty || 1200,
+      domain: classifyProblemDomain(problem),
+      ts: Date.now(),
+      elapsed: elapsedSeconds,
+      par: 0,
+      perf: 0,
+      tr_after: newTr,
+      delta,
+      status: 'giveup'
+    });
+    if (this.userState.solve_log.length > 100) {
+      this.userState.solve_log = this.userState.solve_log.slice(-100);
+    }
+
     this.saveToLocalStorage();
 
     const nextProblem = this.getNextFlowProblem('flow');
@@ -757,6 +1023,126 @@ class FlowStoreClass {
       multiplier: 1.0,
       elapsed_seconds: elapsedSeconds,
       primed_problem: nextProblem
+    };
+  }
+
+  /**
+   * Returns empirical telemetry summary: Rating sparkline points, 8-domain breakdown, and recent activity tape.
+   */
+  getTelemetrySummary() {
+    const log = Array.isArray(this.userState.solve_log) ? this.userState.solve_log : [];
+    const currentTr = this.userState.training_rating || 1200;
+    const domains = this.getDomainSummary();
+
+    // Build sparkline series (up to last 25 events)
+    const sparkPoints = log.slice(-25).map(entry => ({
+      id: entry.id,
+      tr: entry.tr_after || currentTr,
+      rating: entry.tr_after || currentTr,
+      delta: entry.delta || 0,
+      status: entry.status || 'ac',
+      outcome: entry.status || 'ac',
+      frontier: Boolean(entry.frontier),
+      diff: entry.diff || 1200
+    }));
+    if (sparkPoints.length === 0) {
+      sparkPoints.push({ id: 'init', tr: currentTr, rating: currentTr, delta: 0, status: 'init', outcome: 'init', frontier: false, diff: currentTr });
+    }
+
+    let notesCount = 0;
+    for (const p of this.problems) {
+      if (this.hasNotes(p.id)) notesCount++;
+    }
+
+    const domainStats = domains.map(d => {
+      let sumDiff = 0;
+      let countDiff = 0;
+      for (const p of this.problems) {
+        if (classifyProblemDomain(p) === d.key && this.isSolved(p.id)) {
+          const pd = p.clipped_difficulty ?? p.difficulty;
+          if (Number.isFinite(pd) && pd > 0) {
+            sumDiff += pd;
+            countDiff++;
+          }
+        }
+      }
+      return {
+        key: d.key,
+        name: d.name,
+        icon: d.icon,
+        solved: d.solved_count || 0,
+        total: d.total_problems || 0,
+        pct: d.mastery_percent || 0,
+        avgSolvedDiff: countDiff > 0 ? Math.round(sumDiff / countDiff) : null
+      };
+    });
+
+    return {
+      current_tr: currentTr,
+      currentRating: currentTr,
+      cf: atcoderToCodeforces(currentTr),
+      solved_count: this.solvedSet.size,
+      totalSolved: this.solvedSet.size,
+      review_count: this.getReviewQueueCount(),
+      reviewCount: this.getReviewQueueCount(),
+      notesCount,
+      sparkline: sparkPoints,
+      ratingSeries: sparkPoints,
+      recent_tape: [...log].reverse().slice(0, 12),
+      domains,
+      domainStats
+    };
+  }
+
+  /**
+   * Exports all user state and per-problem scratchpad notes as a portable JSON string.
+   */
+  exportFullBackupJSON() {
+    const notes = {};
+    if (typeof localStorage !== 'undefined') {
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith('atcoder_notes_')) {
+          notes[k] = localStorage.getItem(k);
+        }
+      }
+    }
+    return JSON.stringify({
+      version: '2.1',
+      exported_at: new Date().toISOString(),
+      user_state: this.getUserState(),
+      notes
+    }, null, 2);
+  }
+
+  /**
+   * Restores user state and per-problem scratchpad notes from a backup JSON string.
+   */
+  importFullBackupJSON(jsonString) {
+    const parsed = JSON.parse(jsonString);
+    if (!parsed || typeof parsed !== 'object' || !parsed.user_state) {
+      throw new Error('Invalid backup JSON format');
+    }
+    this.userState = { ...this.userState, ...parsed.user_state };
+    if (!Array.isArray(this.userState.review_list)) this.userState.review_list = [];
+    if (!Array.isArray(this.userState.solve_log)) this.userState.solve_log = [];
+    this.solvedSet = new Set(this.userState.solved_ids || []);
+    this.saveToLocalStorage();
+
+    let restoredNotes = 0;
+    if (parsed.notes && typeof parsed.notes === 'object' && typeof localStorage !== 'undefined') {
+      for (const [k, v] of Object.entries(parsed.notes)) {
+        if (k.startsWith('atcoder_notes_') && typeof v === 'string') {
+          localStorage.setItem(k, v);
+          restoredNotes++;
+        }
+      }
+    }
+    return {
+      ...this.getUserState(),
+      solved: this.solvedSet.size,
+      rating: this.userState.training_rating || 1200,
+      restoredNotes
     };
   }
 

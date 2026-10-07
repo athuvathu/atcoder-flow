@@ -68,18 +68,22 @@ class AtCoderFlowApp {
             <span>STREAK:</span>
             <strong id="hud-streak-val">0</strong>
           </div>
-          <div class="metric-pill rating" id="hud-rating-pill" title="AtCoder training rating and Codeforces equivalent">
+          <div class="metric-pill rating editable-rating-badge" id="hud-rating-pill" style="cursor:pointer;" title="Click to manually edit Practice Rating, Auto-Calibrate from Solved History, or view Telemetry">
             <span>RATING:</span>
             <strong id="hud-rating-val" style="color:var(--accent-cyan)">1200</strong>
+            <span class="rating-edit-glyph">✎</span>
             <span id="hud-cf-val" class="hud-cf-badge" style="color:#4a90e2; margin-left:4px;">[CF 1680 Expert]</span>
           </div>
-          <div class="metric-pill solved">
+          <div class="metric-pill solved" id="hud-solved-pill" style="cursor:pointer;" title="Click to view Telemetry, Domain Mastery & State Backup">
             <span>SOLVED:</span>
             <strong id="hud-solved-val">0 AC</strong>
           </div>
         </div>
 
         <div class="header-actions">
+          <button id="btn-cmd-palette" class="btn-icon btn-cmd-trigger" title="Universal Command Palette: Search 954 problems, jump rating, or run actions [Ctrl+K or /]">
+            <span>[Ctrl+K] ⌘ SEARCH</span>
+          </button>
           <button id="btn-gauntlet-session" class="btn-gauntlet-launch" title="Launch 3-Problem Flow Gauntlet (Warmup -> Flow -> Boss) [g]">
             [g] GAUNTLET
           </button>
@@ -108,6 +112,23 @@ class AtCoderFlowApp {
       <!-- Persistent Active Problem Mini-Dock (visible on Table & Tech Tree when a problem timer is active) -->
       <div id="active-session-dock" class="active-session-dock" style="display:none;"></div>
 
+      <!-- Rating Calibrator, Frontier Settings & Telemetry Modal -->
+      <div id="rating-telemetry-overlay" class="shortcuts-modal-overlay" style="display:none;">
+        <div class="shortcuts-modal-card rating-telemetry-card" id="rating-telemetry-body"></div>
+      </div>
+
+      <!-- Universal Command Palette (Ctrl+K / /) -->
+      <div id="cmd-palette-overlay" class="cmd-palette-overlay" style="display:none;">
+        <div class="cmd-palette-card">
+          <div class="cmd-palette-input-wrap">
+            <span class="cmd-palette-prompt">⌘</span>
+            <input type="text" id="cmd-palette-input" class="cmd-palette-input" placeholder="Type a rating (e.g. 1600), problem ID/title, domain, or command..." autocomplete="off" />
+            <kbd class="cmd-palette-esc">ESC</kbd>
+          </div>
+          <div id="cmd-palette-results" class="cmd-palette-results"></div>
+        </div>
+      </div>
+
       <!-- Global Keyboard Shortcuts & Workflow Modal -->
       <div id="shortcuts-modal-overlay" class="shortcuts-modal-overlay" style="display:none;">
         <div class="shortcuts-modal-card">
@@ -121,10 +142,11 @@ class AtCoderFlowApp {
           <div class="shortcuts-grid">
             <div class="shortcuts-col">
               <h4>GLOBAL & PRACTICE TABLE</h4>
+              <div class="shortcut-row"><kbd>Ctrl+K</kbd> / <kbd>/</kbd> <span>Command Palette (Search / Set Rating)</span></div>
               <div class="shortcut-row"><kbd>j</kbd> / <kbd>k</kbd> <span>Move selection Down / Up in Table</span></div>
               <div class="shortcut-row"><kbd>Enter</kbd> <span>Open selected problem in Workbench</span></div>
               <div class="shortcut-row"><kbd>f</kbd> <span>Pull instant Flow problem (at your Par rating)</span></div>
-              <div class="shortcut-row"><kbd>1</kbd> / <kbd>2</kbd> / <kbd>3</kbd> <span>Pull Speed (-200) / Flow (Par) / Reach (+150)</span></div>
+              <div class="shortcut-row"><kbd>1</kbd>/<kbd>2</kbd>/<kbd>3</kbd>/<kbd>4</kbd> <span>Pull Speed / Flow / Reach / ⚑ Review</span></div>
               <div class="shortcut-row"><kbd>g</kbd> <span>Launch 3-Stage Gauntlet Run</span></div>
               <div class="shortcut-row"><kbd>v</kbd> <span>Sync AC submissions from AtCoder / Kenkoooo</span></div>
               <div class="shortcut-row"><kbd>u</kbd> <span>Switch active AtCoder handle</span></div>
@@ -136,6 +158,7 @@ class AtCoderFlowApp {
               <div class="shortcut-row"><kbd>Space</kbd> / <kbd>p</kbd> <span>Pause / Resume Stopwatch Timer</span></div>
               <div class="shortcut-row"><kbd>z</kbd> <span>Reset Stopwatch Timer to 00:00</span></div>
               <div class="shortcut-row"><kbd>w</kbd> <span>End active practice session & stop timer</span></div>
+              <div class="shortcut-row"><kbd>b</kbd> <span>Bookmark / Unbookmark problem for ⚑ Review</span></div>
               <div class="shortcut-row"><kbd>r</kbd> <span>Toggle Problem Statement & Sample Cases</span></div>
               <div class="shortcut-row"><kbd>n</kbd> <span>Toggle Side-by-Side Split Scratchpad</span></div>
               <div class="shortcut-row"><kbd>v</kbd> <span>Verify AC via AtCoder / Kenkoooo API</span></div>
@@ -199,6 +222,7 @@ class AtCoderFlowApp {
       onTimerTick: () => {
         this.updateActiveSessionDock();
       },
+      onOpenRatingModal: () => this.openRatingModal(),
       onExit: (target) => this.handleBackFromZen(target)
     });
 
@@ -247,10 +271,39 @@ class AtCoderFlowApp {
 
   attachGlobalKeynav() {
     window.addEventListener('keydown', (e) => {
+      // Global Ctrl+K / Cmd+K Command Palette trigger (works everywhere)
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        this.toggleCommandPalette();
+        return;
+      }
+
+      const cmdOverlay = document.getElementById('cmd-palette-overlay');
+      if (cmdOverlay && cmdOverlay.style.display !== 'none') {
+        this.handleCommandPaletteKey(e);
+        return;
+      }
+
+      const ratingOverlay = document.getElementById('rating-telemetry-overlay');
+      if (ratingOverlay && ratingOverlay.style.display !== 'none') {
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          this.closeRatingModal();
+        }
+        return;
+      }
+
       const tag = document.activeElement ? document.activeElement.tagName.toLowerCase() : '';
       if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
 
       const key = e.key;
+
+      // '/' opens Command Palette when not typing in an input
+      if (key === '/') {
+        e.preventDefault();
+        this.openCommandPalette();
+        return;
+      }
 
       // Global '?' shortcut modal toggle
       if (key === '?') {
@@ -300,6 +353,9 @@ class AtCoderFlowApp {
       } else if (key === '3') {
         e.preventDefault();
         this.startFlowSession('reach');
+      } else if (key === '4') {
+        e.preventDefault();
+        this.startFlowSession('review');
       } else if (key === 'u') {
         e.preventDefault();
         this.promptChangeHandle();
@@ -318,6 +374,42 @@ class AtCoderFlowApp {
     const handlePill = document.getElementById('hud-handle-pill');
     if (handlePill) {
       handlePill.addEventListener('click', () => this.promptChangeHandle());
+    }
+
+    // Editable Rating pill & Solved pill click -> open Rating Calibrator & Telemetry Modal
+    const ratingPill = document.getElementById('hud-rating-pill');
+    if (ratingPill) {
+      ratingPill.addEventListener('click', () => this.openRatingModal());
+    }
+    const solvedPill = document.getElementById('hud-solved-pill');
+    if (solvedPill) {
+      solvedPill.addEventListener('click', () => this.openRatingModal());
+    }
+
+    // Command Palette button & overlay click
+    const btnCmd = document.getElementById('btn-cmd-palette');
+    if (btnCmd) {
+      btnCmd.addEventListener('click', () => this.openCommandPalette());
+    }
+    const cmdOverlay = document.getElementById('cmd-palette-overlay');
+    if (cmdOverlay) {
+      cmdOverlay.addEventListener('click', (e) => {
+        if (e.target === cmdOverlay) this.closeCommandPalette();
+      });
+    }
+    const cmdInput = document.getElementById('cmd-palette-input');
+    if (cmdInput) {
+      cmdInput.addEventListener('input', () => {
+        this.cmdSelectedIndex = 0;
+        this.renderCommandPaletteResults(cmdInput.value);
+      });
+    }
+
+    const ratingOverlay = document.getElementById('rating-telemetry-overlay');
+    if (ratingOverlay) {
+      ratingOverlay.addEventListener('click', (e) => {
+        if (e.target === ratingOverlay) this.closeRatingModal();
+      });
     }
 
     // Tabs
@@ -782,6 +874,501 @@ class AtCoderFlowApp {
     try {
       flowStore.saveUserPreferences(prefs);
     } catch (_) {}
+  }
+
+  /**
+   * Opens the Rating Calibrator, Auto-Calibration, & Telemetry Modal.
+   */
+  openRatingModal() {
+    audioEngine.playClick();
+    const overlay = document.getElementById('rating-telemetry-overlay');
+    if (!overlay) return;
+    this.renderRatingModalContent();
+    overlay.style.display = 'flex';
+    const inputEl = document.getElementById('input-custom-tr');
+    if (inputEl) {
+      setTimeout(() => {
+        inputEl.focus();
+        inputEl.select();
+      }, 30);
+    }
+  }
+
+  closeRatingModal() {
+    const overlay = document.getElementById('rating-telemetry-overlay');
+    if (overlay) overlay.style.display = 'none';
+  }
+
+  applyCustomRating(newTr, shouldPullFlow = false) {
+    const updated = flowStore.setTrainingRating(newTr);
+    if (!updated) {
+      this.showToast('Invalid rating value.', 'error');
+      return;
+    }
+    audioEngine.playChime();
+    this.userState = updated;
+    this.updateHudDOM();
+    if (this.zen && this.zen.currentProblem) {
+      this.zen.populateDOM(this.zen.currentProblem);
+    }
+    const cfMeta = atcoderToCodeforces(updated.training_rating);
+    this.showToast(`Practice Rating set to ${updated.training_rating} [CF ${cfMeta.cfRating} ${cfMeta.title}]`, 'ac-toast');
+    if (shouldPullFlow) {
+      this.closeRatingModal();
+      this.startFlowSession('flow');
+    } else {
+      this.renderRatingModalContent();
+    }
+  }
+
+  autoCalibrateRating(shouldPullFlow = false) {
+    const res = flowStore.autoCalibrateRatingFromSolved();
+    if (!res || !res.calibrated) {
+      this.showToast(res?.reason || 'Could not auto-calibrate. Sync AtCoder handle first.', 'error');
+      return;
+    }
+    audioEngine.playChime();
+    this.userState = res.state;
+    this.updateHudDOM();
+    if (this.zen && this.zen.currentProblem) {
+      this.zen.populateDOM(this.zen.currentProblem);
+    }
+    this.showToast(`⚡ Auto-Calibrated Rating to ${res.newTr} (from top ${res.sampleSize} solved problems, peak ${res.topPeak})!`, 'ac-toast');
+    if (shouldPullFlow) {
+      this.closeRatingModal();
+      this.startFlowSession('flow');
+    } else {
+      this.renderRatingModalContent();
+    }
+  }
+
+  renderRatingModalContent() {
+    const container = document.getElementById('rating-telemetry-body');
+    if (!container) return;
+
+    const tel = flowStore.getTelemetrySummary();
+    const tr = Math.round(tel.currentRating || 1200);
+    const atMeta = getAtcoderMeta(tr);
+    const cfMeta = atcoderToCodeforces(tr);
+
+    // Build SVG Sparkline from tel.ratingSeries
+    const series = tel.ratingSeries || [{ rating: tr }];
+    const svgW = 520;
+    const svgH = 90;
+    const ratings = series.map(p => p.rating);
+    const minR = Math.min(...ratings, tr - 100);
+    const maxR = Math.max(...ratings, tr + 100);
+    const spanR = Math.max(100, maxR - minR);
+    const pts = series.map((pt, idx) => {
+      const x = series.length === 1 ? svgW / 2 : 16 + (idx / (series.length - 1)) * (svgW - 32);
+      const y = svgH - 16 - ((pt.rating - minR) / spanR) * (svgH - 32);
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    }).join(' ');
+
+    const presets = [
+      { tr: 800, label: '800 Green', color: '#2ecc71' },
+      { tr: 1000, label: '1000 Green+', color: '#2ecc71' },
+      { tr: 1200, label: '1200 Cyan', color: '#00e5ff' },
+      { tr: 1400, label: '1400 Cyan+', color: '#00e5ff' },
+      { tr: 1600, label: '1600 Blue', color: '#4a90e2' },
+      { tr: 1800, label: '1800 Blue+', color: '#4a90e2' },
+      { tr: 2000, label: '2000 Yellow', color: '#f1c40f' },
+      { tr: 2400, label: '2400 Orange', color: '#e67e22' }
+    ];
+
+    container.innerHTML = `
+      <div class="shortcuts-modal-header">
+        <div>
+          <strong>PRACTICE RATING CALIBRATOR & TELEMETRY</strong>
+          <span class="shortcuts-sub">Directly set your target difficulty frontier, auto-calibrate from solved history, or inspect mastery</span>
+        </div>
+        <button id="btn-close-rating-modal" class="btn-drawer-close">[Esc] CLOSE</button>
+      </div>
+
+      <div class="rating-calibrator-section">
+        <div class="rating-calibrator-top">
+          <div class="rating-current-readout">
+            <span class="calibrator-label">CURRENT PRACTICE RATING</span>
+            <div class="calibrator-big-rating" style="color:${atMeta.color}">
+              ${tr} <span class="calibrator-cf-sub" style="color:${cfMeta.color}">[CF ${cfMeta.cfRating} ${cfMeta.title}]</span>
+            </div>
+            <span class="calibrator-hint">Flow pulls problems around <strong>${tr}</strong> · Speed around <strong>${Math.max(100, tr - 200)}</strong> · Reach around <strong>${tr + 175}</strong></span>
+          </div>
+
+          <div class="rating-manual-controls">
+            <label class="calibrator-label" for="input-custom-tr">SET CUSTOM PRACTICE RATING (100 – 3600)</label>
+            <div class="rating-input-row">
+              <input type="number" id="input-custom-tr" class="rating-num-input" min="100" max="3600" step="25" value="${tr}" />
+              <button id="btn-apply-tr" class="btn-zen-primary">SET RATING</button>
+              <button id="btn-apply-tr-pull" class="btn-flow-launch" title="Set Rating and immediately pull a new Flow problem at this level">⚡ SET & PULL PROBLEM</button>
+            </div>
+            <div class="rating-auto-row">
+              <button id="btn-auto-calibrate-tr" class="btn-auto-calibrate" title="Compute 70th percentile of your top 15 hardest solved AtCoder problems">
+                ⚡ AUTO-CALIBRATE FROM MY SOLVED HISTORY (${tel.totalSolved} AC)
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div class="rating-presets-bar">
+          <span class="calibrator-label">1-TAP TIER PRESETS (CLICK TO JUMP & PULL):</span>
+          <div class="rating-preset-chips">
+            ${presets.map(p => `
+              <button class="btn-rating-preset ${Math.abs(tr - p.tr) < 50 ? 'active' : ''}" data-tr="${p.tr}" style="border-color:${p.color}55; color:${p.color};">
+                ${p.label}
+              </button>
+            `).join('')}
+          </div>
+        </div>
+      </div>
+
+      <div class="telemetry-grid-section">
+        <div class="telemetry-col">
+          <div class="telemetry-panel-title">
+            <span>RATING TRAJECTORY & FRONTIER LEAPS</span>
+            <span style="color:var(--text-muted); font-size:0.72rem;">⚑ Review Queue: ${tel.reviewCount} · 📝 Notes: ${tel.notesCount}</span>
+          </div>
+          <div class="sparkline-box">
+            <svg viewBox="0 0 ${svgW} ${svgH}" width="100%" height="${svgH}">
+              <line x1="16" y1="${svgH - 16}" x2="${svgW - 16}" y2="${svgH - 16}" stroke="rgba(255,255,255,0.08)" stroke-dasharray="3,3" />
+              <polyline fill="none" stroke="var(--accent-cyan)" stroke-width="2.2" points="${pts}" />
+              ${series.map((pt, idx) => {
+                const x = series.length === 1 ? svgW / 2 : 16 + (idx / (series.length - 1)) * (svgW - 32);
+                const y = svgH - 16 - ((pt.rating - minR) / spanR) * (svgH - 32);
+                const dotColor = pt.outcome === 'give_up' ? '#ff4757' : (pt.frontier ? '#f1c40f' : '#00e5ff');
+                return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3.2" fill="${dotColor}" />`;
+              }).join('')}
+            </svg>
+            <div class="sparkline-caption">
+              <span>Range: ${Math.round(minR)} – ${Math.round(maxR)}</span>
+              <span>Tip: Solving problems &gt;100 above your rating triggers a <strong>35% Fast Frontier Leap</strong></span>
+            </div>
+          </div>
+
+          <div class="telemetry-panel-title" style="margin-top:12px;">
+            <span>LOCAL STATE BACKUP & RESTORE</span>
+          </div>
+          <div class="backup-actions-row">
+            <button id="btn-export-backup" class="btn-icon">⬇ EXPORT BACKUP (.JSON)</button>
+            <label for="input-import-backup" class="btn-icon" style="cursor:pointer; display:inline-flex; align-items:center;">⬆ IMPORT BACKUP (.JSON)</label>
+            <input type="file" id="input-import-backup" accept=".json,application/json" style="display:none;" />
+          </div>
+        </div>
+
+        <div class="telemetry-col">
+          <div class="telemetry-panel-title">
+            <span>8-DOMAIN EMPIRICAL MASTERY</span>
+            <span style="color:var(--text-muted); font-size:0.72rem;">Click domain to drill</span>
+          </div>
+          <div class="domain-mastery-mini-list">
+            ${tel.domainStats.map(d => `
+              <div class="domain-mastery-mini-row" data-domain="${d.key}" title="Click to pull a Flow problem in ${d.name}">
+                <div class="dm-row-head">
+                  <strong>${d.icon} ${d.name}</strong>
+                  <span>${d.solved}/${d.total} (${d.pct}%) ${d.avgSolvedDiff ? `· Avg ${d.avgSolvedDiff}` : ''}</span>
+                </div>
+                <div class="dm-bar-track">
+                  <div class="dm-bar-fill" style="width:${Math.min(100, d.pct)}%"></div>
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      </div>
+    `;
+
+    // Bind events inside modal
+    document.getElementById('btn-close-rating-modal')?.addEventListener('click', () => this.closeRatingModal());
+
+    const inputTr = document.getElementById('input-custom-tr');
+    document.getElementById('btn-apply-tr')?.addEventListener('click', () => {
+      if (inputTr) this.applyCustomRating(Number(inputTr.value), false);
+    });
+    document.getElementById('btn-apply-tr-pull')?.addEventListener('click', () => {
+      if (inputTr) this.applyCustomRating(Number(inputTr.value), true);
+    });
+    if (inputTr) {
+      inputTr.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          this.applyCustomRating(Number(inputTr.value), true);
+        }
+      });
+    }
+
+    document.getElementById('btn-auto-calibrate-tr')?.addEventListener('click', () => {
+      this.autoCalibrateRating(false);
+    });
+
+    container.querySelectorAll('.btn-rating-preset').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const presetTr = Number(btn.dataset.tr);
+        this.applyCustomRating(presetTr, true);
+      });
+    });
+
+    container.querySelectorAll('.domain-mastery-mini-row').forEach(row => {
+      row.addEventListener('click', () => {
+        const domainKey = row.dataset.domain;
+        this.closeRatingModal();
+        flowStore.setDomainFilter(domainKey);
+        this.startFlowSession('flow', { domainFilter: domainKey });
+      });
+    });
+
+    document.getElementById('btn-export-backup')?.addEventListener('click', () => {
+      const jsonStr = flowStore.exportFullBackupJSON();
+      const blob = new Blob([jsonStr], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `atcoder-flow-backup-${this.userState.handle || 'user'}-${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      this.showToast('Exported full practice state & scratchpad notes backup.', 'ac-toast');
+    });
+
+    const importInput = document.getElementById('input-import-backup');
+    if (importInput) {
+      importInput.addEventListener('change', (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = () => {
+          try {
+            const res = flowStore.importFullBackupJSON(String(reader.result));
+            this.fetchUserState();
+            this.table.fetchProblems();
+            this.renderRatingModalContent();
+            this.showToast(`Restored backup (${res.solved} AC, Rating ${Math.round(res.rating)}, ${res.restoredNotes} notes)!`, 'ac-toast');
+          } catch (err) {
+            this.showToast(`Import failed: ${err.message}`, 'error');
+          }
+        };
+        reader.readAsText(file);
+      });
+    }
+  }
+
+  /**
+   * Universal Command Palette (Ctrl+K / /)
+   */
+  toggleCommandPalette() {
+    const overlay = document.getElementById('cmd-palette-overlay');
+    if (!overlay) return;
+    if (overlay.style.display !== 'none') {
+      this.closeCommandPalette();
+    } else {
+      this.openCommandPalette();
+    }
+  }
+
+  openCommandPalette() {
+    audioEngine.playClick();
+    const overlay = document.getElementById('cmd-palette-overlay');
+    const input = document.getElementById('cmd-palette-input');
+    if (!overlay || !input) return;
+    overlay.style.display = 'flex';
+    input.value = '';
+    this.cmdSelectedIndex = 0;
+    this.renderCommandPaletteResults('');
+    setTimeout(() => input.focus(), 20);
+  }
+
+  closeCommandPalette() {
+    const overlay = document.getElementById('cmd-palette-overlay');
+    if (overlay) overlay.style.display = 'none';
+  }
+
+  handleCommandPaletteKey(e) {
+    const items = this.cmdCurrentItems || [];
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      this.closeCommandPalette();
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (items.length > 0) {
+        this.cmdSelectedIndex = (this.cmdSelectedIndex + 1) % items.length;
+        this.highlightCommandPaletteSelection();
+      }
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (items.length > 0) {
+        this.cmdSelectedIndex = (this.cmdSelectedIndex - 1 + items.length) % items.length;
+        this.highlightCommandPaletteSelection();
+      }
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      const chosen = items[this.cmdSelectedIndex];
+      if (chosen && typeof chosen.action === 'function') {
+        this.closeCommandPalette();
+        chosen.action();
+      }
+    }
+  }
+
+  highlightCommandPaletteSelection() {
+    const container = document.getElementById('cmd-palette-results');
+    if (!container) return;
+    const rows = container.querySelectorAll('.cmd-result-item');
+    rows.forEach((r, idx) => {
+      r.classList.toggle('selected', idx === this.cmdSelectedIndex);
+      if (idx === this.cmdSelectedIndex) {
+        r.scrollIntoView({ block: 'nearest' });
+      }
+    });
+  }
+
+  renderCommandPaletteResults(rawQuery = '') {
+    const container = document.getElementById('cmd-palette-results');
+    if (!container) return;
+
+    const q = rawQuery.trim().toLowerCase();
+    const items = [];
+
+    // 1. Check if user typed a numeric rating (e.g., "1500" or "rating 1600")
+    const numMatch = q.match(/^(?:rating\s+|set\s+|tr\s+)?(\d{3,4})$/);
+    if (numMatch) {
+      const targetTr = Math.max(100, Math.min(3600, Number(numMatch[1])));
+      const cfMeta = atcoderToCodeforces(targetTr);
+      items.push({
+        badge: '⚡ RATING',
+        title: `Set Practice Rating to ${targetTr} [CF ${cfMeta.cfRating} ${cfMeta.title}] & Pull Problem`,
+        sub: 'Immediately jump your training rating and launch a problem at this difficulty',
+        action: () => this.applyCustomRating(targetTr, true)
+      });
+      items.push({
+        badge: '✎ RATING',
+        title: `Set Practice Rating to ${targetTr} (without pulling problem)`,
+        sub: 'Update target difficulty rating in Top Bar',
+        action: () => this.applyCustomRating(targetTr, false)
+      });
+    }
+
+    // 2. Built-in high-leverage workflow commands
+    const commands = [
+      {
+        badge: '✎ CALIBRATE',
+        title: 'Edit Practice Rating / Open Telemetry & Backup Modal',
+        sub: `Current Rating: ${Math.round(this.userState.training_rating || 1200)} · Set custom rating or view domain mastery`,
+        keywords: 'rating edit calibrate telemetry stats sparkline backup export import difficulty boring easy hard',
+        action: () => this.openRatingModal()
+      },
+      {
+        badge: '⚡ AUTO-TR',
+        title: 'Auto-Calibrate Practice Rating from My Solved History',
+        sub: 'Sets your Practice Rating to the 70th percentile of your top 15 hardest solved problems',
+        keywords: 'auto calibrate rating solved history kenkoooo boring easy',
+        action: () => this.autoCalibrateRating(true)
+      },
+      {
+        badge: '🔥 REACH',
+        title: 'Pull Reach Challenge (+150 to +250 harder than current rating)',
+        sub: 'Skip easy warmups and jump straight into a stretch problem',
+        keywords: 'reach hard boss stretch challenge pull',
+        action: () => this.startFlowSession('reach')
+      },
+      {
+        badge: '⚑ REVIEW',
+        title: `Pull from ⚑ Review Queue (${flowStore.getReviewQueueCount()} flagged problems)`,
+        sub: 'Up-solve a problem you previously gave up on or bookmarked (+50% Redemption XP)',
+        keywords: 'review queue bookmark upsolve redemption gave up',
+        action: () => this.startFlowSession('review')
+      },
+      {
+        badge: '⚔ GAUNTLET',
+        title: 'Launch Hard Push Gauntlet (+150 -> +250 -> +400)',
+        sub: '3-stage aggressive difficulty push for rapid rating progression',
+        keywords: 'gauntlet hard push boss',
+        action: () => {
+          flowStore.setGauntletPreset('hard_push');
+          this.startGauntletSession();
+        }
+      },
+      {
+        badge: '⚑ TABLE',
+        title: 'Filter Practice Table to ⚑ Review Queue',
+        sub: 'View all problems in your review / up-solve queue',
+        keywords: 'table filter review queue bookmarks',
+        action: () => {
+          this.table.filterByReviewQueue(true);
+          this.switchViewDOM('table');
+        }
+      }
+    ];
+
+    // Add 8 macro domain quick-drill actions
+    CORE_DOMAINS.forEach(dom => {
+      commands.push({
+        badge: `${dom.icon} DOMAIN`,
+        title: `Drill Domain: ${dom.name}`,
+        sub: dom.subtitle,
+        keywords: `domain ${dom.name.toLowerCase()} ${dom.categories.join(' ').toLowerCase()}`,
+        action: () => {
+          flowStore.setDomainFilter(dom.key);
+          this.startFlowSession('flow', { domainFilter: dom.key });
+        }
+      });
+    });
+
+    for (const cmd of commands) {
+      if (!q || cmd.title.toLowerCase().includes(q) || cmd.sub.toLowerCase().includes(q) || (cmd.keywords && cmd.keywords.includes(q))) {
+        items.push(cmd);
+      }
+    }
+
+    // 3. Search all 954 Golden Era problems
+    if (q.length >= 1) {
+      const allProbs = flowStore.getProblems();
+      let matchedCount = 0;
+      for (const p of allProbs) {
+        if (matchedCount >= 18) break;
+        const hay = `${p.id} ${p.title} ${p.category} ${p.domain_name} ${Math.round(p.difficulty || 0)}`.toLowerCase();
+        if (hay.includes(q)) {
+          matchedCount++;
+          const diff = Math.round(p.difficulty || 800);
+          const statusIcon = p.is_solved ? '✓ AC' : (p.in_review ? '⚑ REV' : `${diff}`);
+          items.push({
+            badge: statusIcon,
+            title: `${p.id.toUpperCase()} — ${p.title}`,
+            sub: `${p.domain_name} · ${p.category} · Diff ${diff}${p.has_notes ? ` · 📝 "${p.notes_snippet}"` : ''}`,
+            action: () => this.openZenMode(p)
+          });
+        }
+      }
+    }
+
+    this.cmdCurrentItems = items.slice(0, 24);
+    if (this.cmdSelectedIndex >= this.cmdCurrentItems.length) {
+      this.cmdSelectedIndex = 0;
+    }
+
+    if (this.cmdCurrentItems.length === 0) {
+      container.innerHTML = `<div class="cmd-empty">No matching problems or commands. Tip: Type a number like <strong>1600</strong> to set your Practice Rating directly.</div>`;
+      return;
+    }
+
+    container.innerHTML = this.cmdCurrentItems.map((item, idx) => `
+      <div class="cmd-result-item ${idx === this.cmdSelectedIndex ? 'selected' : ''}" data-idx="${idx}">
+        <span class="cmd-result-badge">${item.badge}</span>
+        <div class="cmd-result-main">
+          <div class="cmd-result-title">${item.title}</div>
+          <div class="cmd-result-sub">${item.sub}</div>
+        </div>
+        <span class="cmd-result-enter">↵</span>
+      </div>
+    `).join('');
+
+    container.querySelectorAll('.cmd-result-item').forEach(row => {
+      row.addEventListener('click', () => {
+        const idx = Number(row.dataset.idx);
+        const chosen = this.cmdCurrentItems[idx];
+        if (chosen && typeof chosen.action === 'function') {
+          this.closeCommandPalette();
+          chosen.action();
+        }
+      });
+    });
   }
 
   showToast(msg, className = '') {

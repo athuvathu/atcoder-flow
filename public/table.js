@@ -53,6 +53,8 @@ export class PracticeTable {
     this.domainFilter = 'ALL';
     this.searchQuery = '';
     this.unsolvedOnly = false;
+    this.reviewOnly = false;
+    this.notesOnly = false;
     this.hideDifficulty = false;
     this.sortField = 'diff'; // 'diff' | 'contest' | 'title'
     this.sortAsc = true;
@@ -79,6 +81,7 @@ export class PracticeTable {
    * Renders the layout skeleton including filter bar, difficulty band presets, and sortable table.
    */
   renderSkeleton() {
+    const revCount = flowStore.getReviewQueueCount ? flowStore.getReviewQueueCount() : 0;
     this.container.innerHTML = `
       <div class="filter-bar">
         <div class="filter-group">
@@ -121,6 +124,12 @@ export class PracticeTable {
         </div>
 
         <div class="filter-group">
+          <button id="toggle-review-btn" class="toggle-switch-btn toggle-review-chip ${this.reviewOnly ? 'active' : ''}" title="Filter to Spaced Repetition Up-Solve Review Queue">
+            ⚑ Review (${revCount})
+          </button>
+          <button id="toggle-notes-btn" class="toggle-switch-btn ${this.notesOnly ? 'active' : ''}" title="Filter to problems with saved Scratchpad notes">
+            📝 Notes
+          </button>
           <button id="toggle-hide-diff-btn" class="toggle-switch-btn ${this.hideDifficulty ? 'active' : ''}">
             Blind: ${this.hideDifficulty ? 'ON' : 'OFF'}
           </button>
@@ -135,6 +144,7 @@ export class PracticeTable {
           <span>Keys:</span>
           <span class="key-badge">j</span>/<span class="key-badge">k</span> move
           <span class="key-badge">Enter</span> open workspace
+          <span class="key-badge">Ctrl+K</span> / <span class="key-badge">/</span> command palette
           <span class="key-badge">f</span> instant flow
           <span class="key-badge">g</span> gauntlet
           <span class="key-badge">?</span> all shortcuts
@@ -264,6 +274,28 @@ export class PracticeTable {
       });
     }
 
+    // Review Queue toggle
+    const reviewBtn = this.container.querySelector('#toggle-review-btn');
+    if (reviewBtn) {
+      reviewBtn.addEventListener('click', () => {
+        this.onAudioClick();
+        this.reviewOnly = !this.reviewOnly;
+        reviewBtn.classList.toggle('active', this.reviewOnly);
+        this.applyFilters();
+      });
+    }
+
+    // Saved Notes toggle
+    const notesBtn = this.container.querySelector('#toggle-notes-btn');
+    if (notesBtn) {
+      notesBtn.addEventListener('click', () => {
+        this.onAudioClick();
+        this.notesOnly = !this.notesOnly;
+        notesBtn.classList.toggle('active', this.notesOnly);
+        this.applyFilters();
+      });
+    }
+
     // Blind mode toggle
     const hideDiffBtn = this.container.querySelector('#toggle-hide-diff-btn');
     if (hideDiffBtn) {
@@ -321,6 +353,15 @@ export class PracticeTable {
         }
       });
     }
+  }
+
+  filterByReviewQueue(enable = true) {
+    this.reviewOnly = Boolean(enable);
+    const reviewBtn = this.container.querySelector('#toggle-review-btn');
+    if (reviewBtn) {
+      reviewBtn.classList.toggle('active', this.reviewOnly);
+    }
+    this.applyFilters();
   }
 
   updateSortHeaderUI() {
@@ -431,7 +472,17 @@ export class PracticeTable {
    * Applies active filters and sorting, then renders matching problem rows.
    */
   applyFilters() {
+    // Refresh live review/notes flags on problems list
+    this.problems = flowStore.getProblems();
+    const reviewBtn = this.container.querySelector('#toggle-review-btn');
+    if (reviewBtn && flowStore.getReviewQueueCount) {
+      reviewBtn.textContent = `⚑ Review (${flowStore.getReviewQueueCount()})`;
+    }
+
     const filtered = this.problems.filter(prob => {
+      if (this.reviewOnly && !prob.in_review) return false;
+      if (this.notesOnly && !prob.has_notes) return false;
+
       // Contest filter
       if (this.contestFilter !== 'ALL') {
         const c = (prob.contest_id || '').toLowerCase();
@@ -534,19 +585,24 @@ export class PracticeTable {
 
       // Title color depends on rating band unless blind mode is active
       const titleColor = this.hideDifficulty ? 'var(--text-primary)' : band.hex;
+      const safeSnippet = (prob.notes_snippet || '').replace(/"/g, '&quot;');
 
       return `
         <div class="table-row row-item ${isSelected ? 'selected' : ''}" data-index="${idx}" data-id="${prob.id}">
           <div class="col-status">
             ${isSolved 
               ? `<span class="status-badge ac">[AC]</span>` 
-              : `<span class="status-badge unsolved">[--]</span>`}
+              : prob.in_review
+                ? `<span class="status-badge review-flag" title="Queued for Spaced Repetition Up-Solve">[⚑ REV]</span>`
+                : `<span class="status-badge unsolved">[--]</span>`}
           </div>
           <div class="col-contest">${(prob.contest_id || '').toUpperCase()}</div>
           <div class="col-title" style="color: ${titleColor};">
             <a href="#/problem/${encodeURIComponent(prob.id)}" class="problem-link" data-id="${prob.id}">${prob.title || prob.id}</a>
             <span class="domain-row-pill">${domainLabel}</span>
             ${prob.category ? `<span class="category-tag">${prob.category}</span>` : ''}
+            ${prob.in_review ? `<span class="row-review-pill" title="In Review Queue — Up-solve this problem">⚑ REVIEW</span>` : ''}
+            ${prob.has_notes ? `<span class="row-notes-pill" title="Saved Note: ${safeSnippet}">📝 ${ safeSnippet.slice(0, 28) }${safeSnippet.length > 28 ? '…' : ''}</span>` : ''}
           </div>
           <div class="col-diff">
             <span class="${dotClasses}" style="${dotStyle}" title="Rating: ${clippedDiff}"></span>
