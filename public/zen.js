@@ -44,6 +44,7 @@ export class ZenFlowHUD {
     this.onSolveAC = options.onSolveAC || (() => {});
     this.onGiveUp = options.onGiveUp || (() => {});
     this.onProblemChange = options.onProblemChange || (() => {});
+    this.onTimerTick = options.onTimerTick || (() => {});
 
     this.restoreSession();
   }
@@ -86,26 +87,41 @@ export class ZenFlowHUD {
   }
 
   /**
+   * Cleanly ends and clears the active problem session.
+   */
+  endSession() {
+    this.destroy();
+    this.currentProblem = null;
+    this.elapsedSeconds = 0;
+    this.isPaused = false;
+    try {
+      localStorage.removeItem('atcoder_flow_zen_state');
+    } catch (_) {}
+    this.onProblemChange(null);
+    this.onTimerTick();
+  }
+
+  /**
    * Initializes Zen Mode with a selected problem, runs the 350ms reel roll.
    */
   async loadProblem(problem, skipReel = false) {
     this.currentProblem = problem;
     this.revealedCategory = false;
     this.primedProblem = null;
-    this.isReaderOpen = false;
-    this.isNotesOpen = false;
     this.statementData = null;
-
-    // Asynchronously pre-fetch statement in background for instant reader opening
-    flowStore.fetchStatement(problem.id)
-      .then(d => { if (d && d.statement_html) this.statementData = d; })
-      .catch(() => {});
 
     // Fetch full problem details if needed
     if (!problem.url) {
       const p = flowStore.getProblem(problem.id);
       if (p) this.currentProblem = p;
     }
+
+    // Smart Defaults (Krug's "Don't Make Me Think"):
+    // 1. Always open the Problem Statement & Samples immediately when loading a problem.
+    // 2. If the user already has saved scratchpad notes for this problem, open Scratchpad alongside it in split-view.
+    this.isReaderOpen = true;
+    const existingNotes = localStorage.getItem(`atcoder_notes_${this.currentProblem.id}`);
+    this.isNotesOpen = Boolean(existingNotes && existingNotes.trim().length > 0);
 
     // Calibrate Par time
     const diff = this.currentProblem.clipped_difficulty || 1200;
@@ -129,6 +145,7 @@ export class ZenFlowHUD {
 
     this.render();
     this.updateStopwatchDisplay();
+    this.syncWorkbenchPanes();
 
     // Auto-dispatch problem + test cases to local editor / CPH quietly in background
     this.pushToCPH(true);
@@ -141,6 +158,7 @@ export class ZenFlowHUD {
 
     this.persistSession();
     this.onProblemChange(this.currentProblem);
+    this.onTimerTick();
   }
 
   /**
@@ -193,6 +211,7 @@ export class ZenFlowHUD {
       if (!this.isPaused) {
         this.elapsedSeconds++;
         this.updateStopwatchDisplay();
+        this.onTimerTick();
 
         if (this.elapsedSeconds % 10 === 0) {
           this.persistSession();
@@ -263,14 +282,12 @@ export class ZenFlowHUD {
 
     const pauseOverlay = this.container.querySelector('#zen-pause-overlay');
     const pauseTitle = this.container.querySelector('#zen-pause-title');
-    const pauseBtn = this.container.querySelector('#btn-zen-pause');
     const inlinePauseBtn = this.container.querySelector('#btn-zen-inline-pause');
     const statusTag = this.container.querySelector('#zen-status-indicator');
 
     if (this.isPaused) {
       if (pauseTitle) pauseTitle.textContent = `[ PAUSED · ${this.formatTime(this.elapsedSeconds)} ]`;
       if (pauseOverlay) pauseOverlay.style.display = 'flex';
-      if (pauseBtn) pauseBtn.textContent = '[Space] RESUME';
       if (inlinePauseBtn) inlinePauseBtn.textContent = '▶ Resume';
       if (statusTag) {
         statusTag.textContent = '[ PAUSED ]';
@@ -278,7 +295,6 @@ export class ZenFlowHUD {
       }
     } else {
       if (pauseOverlay) pauseOverlay.style.display = 'none';
-      if (pauseBtn) pauseBtn.textContent = '[Space] PAUSE';
       if (inlinePauseBtn) inlinePauseBtn.textContent = '⏸ Pause';
       if (statusTag) {
         statusTag.textContent = '[ RUNNING ]';
@@ -287,6 +303,7 @@ export class ZenFlowHUD {
     }
 
     this.persistSession();
+    this.onTimerTick();
   }
 
   /**
@@ -298,11 +315,9 @@ export class ZenFlowHUD {
     if (this.isPaused) {
       this.isPaused = false;
       const pauseOverlay = this.container.querySelector('#zen-pause-overlay');
-      const pauseBtn = this.container.querySelector('#btn-zen-pause');
       const inlinePauseBtn = this.container.querySelector('#btn-zen-inline-pause');
       const statusTag = this.container.querySelector('#zen-status-indicator');
       if (pauseOverlay) pauseOverlay.style.display = 'none';
-      if (pauseBtn) pauseBtn.textContent = '[Space] PAUSE';
       if (inlinePauseBtn) inlinePauseBtn.textContent = '⏸ Pause';
       if (statusTag) {
         statusTag.textContent = '[ RUNNING ]';
@@ -311,6 +326,7 @@ export class ZenFlowHUD {
     }
     this.updateStopwatchDisplay();
     this.persistSession();
+    this.onTimerTick();
     this.showToast('Stopwatch reset to 00:00', 'info');
   }
 
@@ -373,52 +389,96 @@ export class ZenFlowHUD {
   }
 
   /**
-   * Toggles the in-app Problem Statement Reader drawer.
+   * Synchronizes the Statement Reader and Scratchpad Notes panes, supporting side-by-side split view.
+   */
+  async syncWorkbenchPanes(focusNotes = false) {
+    const grid = this.container.querySelector('#zen-workbench-grid');
+    const readerDrawer = this.container.querySelector('#zen-reader-drawer');
+    const notesDrawer = this.container.querySelector('#zen-notes-drawer');
+    const btnReader = this.container.querySelector('#btn-zen-reader');
+    const btnNotes = this.container.querySelector('#btn-zen-notes');
+
+    if (btnReader) btnReader.classList.toggle('active', this.isReaderOpen);
+    if (btnNotes) btnNotes.classList.toggle('active', this.isNotesOpen);
+
+    if (grid) {
+      grid.classList.toggle('split-two-col', this.isReaderOpen && this.isNotesOpen);
+      grid.style.display = (this.isReaderOpen || this.isNotesOpen) ? 'grid' : 'none';
+    }
+
+    if (readerDrawer) {
+      readerDrawer.style.display = this.isReaderOpen ? 'flex' : 'none';
+      if (this.isReaderOpen && !readerDrawer.dataset.loadedFor || (this.isReaderOpen && readerDrawer.dataset.loadedFor !== this.currentProblem?.id)) {
+        await this.populateReaderPane(readerDrawer);
+      }
+    }
+
+    if (notesDrawer) {
+      notesDrawer.style.display = this.isNotesOpen ? 'flex' : 'none';
+      if (this.isNotesOpen) {
+        if (notesDrawer.dataset.loadedFor !== this.currentProblem?.id) {
+          this.populateNotesPane(notesDrawer);
+        }
+        if (focusNotes) {
+          const textarea = notesDrawer.querySelector('#zen-scratchpad-input');
+          if (textarea) textarea.focus();
+        }
+      }
+    }
+  }
+
+  /**
+   * Toggles the in-app Problem Statement Reader pane.
    */
   async toggleReader() {
     audioEngine.playClick();
-    const drawer = this.container.querySelector('#zen-reader-drawer');
-    if (!drawer) return;
-
     this.isReaderOpen = !this.isReaderOpen;
-    drawer.style.display = this.isReaderOpen ? 'flex' : 'none';
+    await this.syncWorkbenchPanes(false);
+  }
 
-    if (this.isReaderOpen) {
-      if (this.isNotesOpen) this.toggleNotes();
+  /**
+   * Fetches and populates the Statement Reader pane.
+   */
+  async populateReaderPane(drawer) {
+    if (!this.currentProblem) return;
+    const probId = this.currentProblem.id;
+    drawer.dataset.loadedFor = probId;
 
-      if (this.statementData) {
-        this.renderReaderContent(drawer, this.statementData);
-      } else {
-        drawer.innerHTML = `
-          <div class="drawer-header">
-            <span>TASK STATEMENT & REAL SAMPLES</span>
-            <button id="btn-close-reader" class="btn-drawer-close">[r] CLOSE</button>
+    if (this.statementData) {
+      this.renderReaderContent(drawer, this.statementData);
+      return;
+    }
+
+    drawer.innerHTML = `
+      <div class="drawer-header">
+        <span>TASK STATEMENT & OFFICIAL SAMPLES</span>
+        <button id="btn-close-reader" class="btn-drawer-close" title="Collapse Statement [r]">[r] HIDE</button>
+      </div>
+      <div class="drawer-loading">Fetching official statement from AtCoder...</div>
+    `;
+    drawer.querySelector('#btn-close-reader')?.addEventListener('click', () => this.toggleReader());
+
+    try {
+      const data = await flowStore.fetchStatement(probId);
+      if (this.currentProblem?.id !== probId) return;
+      this.statementData = data;
+      this.renderReaderContent(drawer, data);
+    } catch (err) {
+      if (this.currentProblem?.id !== probId) return;
+      drawer.innerHTML = `
+        <div class="drawer-header">
+          <span>TASK STATEMENT</span>
+          <button id="btn-close-reader" class="btn-drawer-close">[r] HIDE</button>
+        </div>
+        <div class="drawer-error">
+          Could not fetch statement: ${escapeHtml(err.message)}
+          <div style="margin-top:12px;">
+            <button id="btn-fallback-open" class="btn-primary">[o] OPEN ON ATCODER ↗</button>
           </div>
-          <div class="drawer-loading">Fetching official statement from AtCoder...</div>
-        `;
-        drawer.querySelector('#btn-close-reader').addEventListener('click', () => this.toggleReader());
-
-        try {
-          const data = await flowStore.fetchStatement(this.currentProblem.id);
-          this.statementData = data;
-          this.renderReaderContent(drawer, data);
-        } catch (err) {
-          drawer.innerHTML = `
-            <div class="drawer-header">
-              <span>TASK STATEMENT</span>
-              <button id="btn-close-reader" class="btn-drawer-close">[r] CLOSE</button>
-            </div>
-            <div class="drawer-error">
-              Could not fetch statement: ${escapeHtml(err.message)}
-              <div style="margin-top:12px;">
-                <button id="btn-fallback-open" class="btn-primary">[o] ATCODER TASK</button>
-              </div>
-            </div>
-          `;
-          drawer.querySelector('#btn-close-reader').addEventListener('click', () => this.toggleReader());
-          drawer.querySelector('#btn-fallback-open')?.addEventListener('click', () => this.openOfficialTask());
-        }
-      }
+        </div>
+      `;
+      drawer.querySelector('#btn-close-reader')?.addEventListener('click', () => this.toggleReader());
+      drawer.querySelector('#btn-fallback-open')?.addEventListener('click', () => this.openOfficialTask());
     }
   }
 
@@ -433,10 +493,13 @@ export class ZenFlowHUD {
     drawer.innerHTML = `
       <div class="drawer-header">
         <div class="drawer-title-group">
-          <strong>${this.currentProblem.title || this.currentProblem.id}</strong>
-          <span class="limit-pill">LIMIT: ${timeLimitSec}s · ${memLimitMb}MB</span>
+          <strong>${escapeHtml(this.currentProblem.title || this.currentProblem.id)}</strong>
+          <span class="limit-pill">TL: ${timeLimitSec}s · ML: ${memLimitMb}MB</span>
         </div>
-        <button id="btn-close-reader" class="btn-drawer-close">[r] CLOSE</button>
+        <div class="drawer-header-actions">
+          ${!this.isNotesOpen ? `<button id="btn-open-split-notes" class="btn-drawer-action" title="Open Side-by-Side Scratchpad [n]">+ [n] Split Scratchpad</button>` : ''}
+          <button id="btn-close-reader" class="btn-drawer-close" title="Hide Statement [r]">[r] HIDE</button>
+        </div>
       </div>
 
       <div class="drawer-scroll-body">
@@ -479,7 +542,8 @@ export class ZenFlowHUD {
       this.renderLatex(statementEl);
     }
 
-    drawer.querySelector('#btn-close-reader').addEventListener('click', () => this.toggleReader());
+    drawer.querySelector('#btn-close-reader')?.addEventListener('click', () => this.toggleReader());
+    drawer.querySelector('#btn-open-split-notes')?.addEventListener('click', () => this.toggleNotes());
 
     drawer.querySelectorAll('.btn-copy-sample').forEach(btn => {
       btn.addEventListener('click', (e) => {
@@ -488,7 +552,7 @@ export class ZenFlowHUD {
         if (pre) {
           navigator.clipboard.writeText(pre.textContent).then(() => {
             const originalText = e.target.textContent;
-            e.target.textContent = 'COPIED';
+            e.target.textContent = '✓ COPIED';
             audioEngine.playClick();
             setTimeout(() => e.target.textContent = originalText, 1500);
           }).catch(() => {
@@ -543,34 +607,39 @@ export class ZenFlowHUD {
   }
 
   /**
-   * Toggles the inline Scratchpad / Invariants drawer.
+   * Toggles the inline Scratchpad / Invariants pane (opens side-by-side with Statement).
    */
   toggleNotes() {
     audioEngine.playClick();
-    const drawer = this.container.querySelector('#zen-notes-drawer');
-    if (!drawer) return;
-
     this.isNotesOpen = !this.isNotesOpen;
-    drawer.style.display = this.isNotesOpen ? 'flex' : 'none';
+    this.syncWorkbenchPanes(this.isNotesOpen);
+    // Refresh reader header button (+ Split Scratchpad)
+    const splitBtn = this.container.querySelector('#btn-open-split-notes');
+    if (splitBtn) splitBtn.style.display = this.isNotesOpen ? 'none' : 'inline-flex';
+  }
 
-    if (this.isNotesOpen) {
-      if (this.isReaderOpen) this.toggleReader();
-
-      const storageKey = `atcoder_notes_${this.currentProblem.id}`;
-      const savedNotes = localStorage.getItem(storageKey) || '';
-      drawer.innerHTML = `
-        <div class="drawer-header">
-          <span>SCRATCHPAD & INVARIANTS</span>
-          <button id="btn-close-notes" class="btn-drawer-close">✕ [n / Esc]</button>
+  populateNotesPane(drawer) {
+    if (!this.currentProblem) return;
+    const probId = this.currentProblem.id;
+    drawer.dataset.loadedFor = probId;
+    const storageKey = `atcoder_notes_${probId}`;
+    const savedNotes = localStorage.getItem(storageKey) || '';
+    drawer.innerHTML = `
+      <div class="drawer-header">
+        <span>SCRATCHPAD & INVARIANTS // ${escapeHtml(probId.toUpperCase())}</span>
+        <button id="btn-close-notes" class="btn-drawer-close" title="Close Scratchpad [n / Esc]">✕ [n]</button>
+      </div>
+      <div class="notes-body">
+        <textarea id="zen-scratchpad-input" placeholder="Jot invariants, state transitions, complexity bounds, or edge cases while reading the statement...">${escapeHtml(savedNotes)}</textarea>
+        <div class="notes-footer">
+          <span>Auto-saved locally for ${escapeHtml(probId)}</span>
+          <span>Press [Esc] to unfocus editor</span>
         </div>
-        <div class="notes-body">
-          <textarea id="zen-scratchpad-input" placeholder="Jot invariants, state space, complexity bounds, or counter-examples here...">${escapeHtml(savedNotes)}</textarea>
-          <div class="notes-footer">Auto-saved to local storage for ${this.currentProblem.id}</div>
-        </div>
-      `;
-      drawer.querySelector('#btn-close-notes').addEventListener('click', () => this.toggleNotes());
-      const textarea = drawer.querySelector('#zen-scratchpad-input');
-      textarea.focus();
+      </div>
+    `;
+    drawer.querySelector('#btn-close-notes')?.addEventListener('click', () => this.toggleNotes());
+    const textarea = drawer.querySelector('#zen-scratchpad-input');
+    if (textarea) {
       textarea.addEventListener('input', (e) => {
         localStorage.setItem(storageKey, e.target.value);
       });
@@ -1261,15 +1330,15 @@ export class ZenFlowHUD {
             <div class="pause-scrim-actions">
               <button id="btn-resume-scrim" class="btn-primary">[Space] ▶ Resume Practice</button>
               <button id="btn-reset-scrim" class="btn-action">[z] ↺ Reset Timer (00:00)</button>
-              <button id="btn-exit-scrim" class="btn-action-ghost">[Esc] ← Exit Workspace</button>
+              <button id="btn-exit-scrim" class="btn-action-ghost">[Esc] ← Return to Table</button>
             </div>
           </div>
         </div>
 
-        <!-- Top-Left Contextual Navigation & Breadcrumb Bar -->
+        <!-- Top-Left Contextual Navigation & Flow Scope Bar -->
         <nav class="zen-nav-bar">
           <div class="zen-nav-left">
-            <button id="btn-zen-nav-back" class="btn-nav-back" title="Return to previous view [Browser Back / Esc]">
+            <button id="btn-zen-nav-back" class="btn-nav-back" title="Return to previous view (timer continues in mini-dock) [Browser Back / Esc]">
               ← Back
             </button>
             <div class="zen-breadcrumb">
@@ -1279,15 +1348,35 @@ export class ZenFlowHUD {
               <span class="crumb-sep">/</span>
               <span class="crumb-problem">${escapeHtml(prob.title || prob.id || '')}</span>
             </div>
-          </div>
-          <div class="zen-nav-right">
             ${domainFilter ? `
-              <span class="active-domain-chip" id="zen-domain-drill-chip">
+              <span class="zen-domain-drill-chip" id="zen-domain-drill-chip">
                 <span>DRILL: ${domainFilter.replace(/_/g, ' ').toUpperCase()}</span>
-                <button id="btn-zen-clear-domain" class="btn-clear-domain" title="Clear domain drill lock">×</button>
+                <button id="btn-zen-clear-domain" class="btn-chip-clear" title="Clear domain drill lock">×</button>
               </span>
             ` : ''}
-            <span class="zen-nav-hint">[z] Reset Timer · [Space] Pause · [Esc] Back</span>
+          </div>
+
+          <div class="zen-nav-right">
+            <div class="zen-inline-scope">
+              <span class="mode-label">CHANNEL:</span>
+              <button class="btn-mode ${this.activeMode === 'speed' ? 'active' : ''}" data-mode="speed" title="Fast fluency drills (-200) [1]">[1] Speed</button>
+              <button class="btn-mode ${this.activeMode === 'flow' ? 'active' : ''}" data-mode="flow" title="Optimal challenge at Par rating [2]">[2] Flow</button>
+              <button class="btn-mode ${this.activeMode === 'reach' ? 'active' : ''}" data-mode="reach" title="Growth breakthrough challenge (+150) [3]">[3] Reach</button>
+              <span class="mode-sep">·</span>
+              <div class="contest-btn-group-zen">
+                <button class="btn-contest-opt ${contestFilter === 'all' ? 'active' : ''}" data-contest="all" title="All Golden Era [x]">ALL</button>
+                <button class="btn-contest-opt ${contestFilter === 'abc' ? 'active' : ''}" data-contest="abc" title="ABC Only [x]">ABC</button>
+                <button class="btn-contest-opt ${contestFilter === 'arc' ? 'active' : ''}" data-contest="arc" title="ARC Only [x]">ARC</button>
+                <button class="btn-contest-opt ${contestFilter === 'agc' ? 'active' : ''}" data-contest="agc" title="AGC Only [x]">AGC</button>
+              </div>
+              <span class="mode-sep">·</span>
+              <div class="bump-control-cluster" title="Difficulty target offset [- / + / 0]">
+                <button id="btn-bump-down" class="btn-bump-btn">-50</button>
+                <span id="zen-bump-val" class="bump-val-pill ${diffOffset > 0 ? 'bump-pos' : diffOffset < 0 ? 'bump-neg' : ''}">${diffOffset > 0 ? '+' : ''}${diffOffset}</span>
+                <button id="btn-bump-up" class="btn-bump-btn">+50</button>
+              </div>
+              <button id="btn-zen-gauntlet" class="btn-mode-gauntlet ${this.gauntletState && this.gauntletState.active ? 'active' : ''}" title="Launch 3-Stage Gauntlet [g]">[g] Gauntlet</button>
+            </div>
           </div>
         </nav>
 
@@ -1301,22 +1390,22 @@ export class ZenFlowHUD {
               ${this.gauntletState && this.gauntletState.active ? `<span class="gauntlet-stage-tag">[ GAUNTLET: STAGE ${this.gauntletState.stage}/3 ]</span>` : ''}
               <span class="contest-slug">${contest}</span>
               <span style="color:var(--text-muted)">//</span>
-              <strong id="zen-slot-title" class="task-title">${prob.title || prob.id}</strong>
+              <strong id="zen-slot-title" class="task-title">${escapeHtml(prob.title || prob.id)}</strong>
             </div>
             <div class="task-meta-pills">
               <span id="zen-slot-diff" class="diff-badge">DIFF: ${prob.clipped_difficulty || 'N/A'}</span>
               <span id="zen-active-contest-pill" class="contest-badge-pill">${contestFilter.toUpperCase()}</span>
               ${diffOffset !== 0 ? `<span id="zen-active-bump-pill" class="diff-bump-pill ${diffOffset > 0 ? 'bump-pos' : 'bump-neg'}">${diffOffset > 0 ? '+' : ''}${diffOffset} BUMP</span>` : `<span id="zen-active-bump-pill" class="diff-bump-pill" style="display:none;"></span>`}
-              <span id="zen-topic-tag" class="topic-badge">TOPIC: [HIDDEN // 't']</span>
+              <span id="zen-topic-tag" class="topic-badge" style="cursor:pointer;" title="Click or press [t] to reveal topic">TOPIC: [HIDDEN // 't']</span>
               <span class="rating-badge">PERF: <strong style="color:${atMeta.color};">${this.trainingRating}</strong> <span style="color:${cfMeta.color}; margin-left:4px;">[CF ${cfMeta.cfRating} ${cfMeta.title}]</span></span>
             </div>
           </div>
 
           <div class="hud-right">
-            <!-- Par Race Stopwatch & Direct Transport Controls -->
+            <!-- Par Race Stopwatch & Exclusive Transport Controls -->
             <div class="stopwatch-cluster">
               <div class="stopwatch-top-row">
-                <div id="zen-clock" class="stopwatch-display">${this.formatTime(this.elapsedSeconds)}</div>
+                <div id="zen-clock" class="stopwatch-display" title="Click to Pause/Resume [Space]">${this.formatTime(this.elapsedSeconds)}</div>
                 <div class="stopwatch-controls">
                   <button id="btn-zen-inline-pause" class="btn-timer-ctrl" title="Pause / Resume Timer [Space]">
                     ${this.isPaused ? '▶ Resume' : '⏸ Pause'}
@@ -1335,128 +1424,78 @@ export class ZenFlowHUD {
             <!-- Session Solves -->
             <div class="session-cluster">
               <div class="streak-label">SESSION: <strong>${this.sessionSolves} AC</strong></div>
-              <div class="session-solves-badge">STREAK: <strong>${this.sessionSolves}</strong></div>
+              <div class="session-solves-badge">STREAK: <strong>${this.streak || this.sessionSolves}</strong></div>
             </div>
           </div>
         </header>
 
-        <!-- Training Intensity & Scope Selector -->
-        <div class="zen-mode-selector">
-          <span class="mode-label">INTENSITY:</span>
-          <button class="btn-mode ${this.activeMode === 'speed' ? 'active' : ''}" data-mode="speed" title="Fast fluency drills (-200)">[1] Speed</button>
-          <button class="btn-mode ${this.activeMode === 'flow' ? 'active' : ''}" data-mode="flow" title="Optimal challenge at Par rating">[2] Flow</button>
-          <button class="btn-mode ${this.activeMode === 'reach' ? 'active' : ''}" data-mode="reach" title="Growth breakthrough challenge (+150)">[3] Reach</button>
-          <span class="mode-sep">|</span>
-          <span class="mode-label">CONTEST:</span>
-          <div class="contest-btn-group-zen">
-            <button class="btn-contest-opt ${contestFilter === 'all' ? 'active' : ''}" data-contest="all" title="All Golden Era (ABC 150+, ARC 100+, AGC, DP) [x]">ALL</button>
-            <button class="btn-contest-opt ${contestFilter === 'abc' ? 'active' : ''}" data-contest="abc" title="ABC Only (ABC 150+) [x]">ABC</button>
-            <button class="btn-contest-opt ${contestFilter === 'arc' ? 'active' : ''}" data-contest="arc" title="ARC Only (ARC 100+) [x]">ARC</button>
-            <button class="btn-contest-opt ${contestFilter === 'agc' ? 'active' : ''}" data-contest="agc" title="AGC Only (AtCoder Grand Contest) [x]">AGC</button>
-          </div>
-          <span class="mode-sep">|</span>
-          <span class="mode-label">BUMP:</span>
-          <div class="bump-control-cluster">
-            <button id="btn-bump-down" class="btn-bump-btn" title="Decrease difficulty target by 50 [-]">-50</button>
-            <span id="zen-bump-val" class="bump-val-pill ${diffOffset > 0 ? 'bump-pos' : diffOffset < 0 ? 'bump-neg' : ''}" title="Difficulty target offset. Click or press [0] to reset">${diffOffset > 0 ? '+' : ''}${diffOffset}</span>
-            <button id="btn-bump-up" class="btn-bump-btn" title="Increase difficulty target by 50 [= or +]">+50</button>
-          </div>
-          <span class="mode-sep">|</span>
-          <button id="btn-zen-gauntlet" class="btn-mode-gauntlet ${this.gauntletState && this.gauntletState.active ? 'active' : ''}" title="Launch structured 3-problem Gauntlet Run [g]">[g] Gauntlet Run (3-Stage)</button>
-        </div>
-
-        <!-- Principled Grouped Action Toolbar -->
-        <div class="zen-action-cluster">
-          <div class="primary-actions">
-            <div class="action-group">
-              <span class="action-group-label">WORKSPACE</span>
-              <button id="btn-zen-reader" class="btn-reader-toggle" title="Read problem statement & copy samples [r]">
-                [r] READER
-              </button>
-              <button id="btn-zen-cph-push" class="btn-cph-push" title="Push problem & real samples directly to CPH / Editor [c]">
-                [c] CPH PUSH
-              </button>
-              <button id="btn-zen-notes" class="btn-notes-toggle" title="Scratchpad & invariants [n]">
-                [n] NOTES
-              </button>
-              <button id="btn-zen-cph" class="btn-cph-open" title="Open official AtCoder problem page in browser [o]">
-                [o] ATCODER ↗
-              </button>
-            </div>
-
-            <div class="action-group">
-              <span class="action-group-label">VERDICT & TIMER</span>
-              <button id="btn-zen-verify" class="btn-solve-ac" title="Verify submission on AtCoder [v]">
-                [v] VERIFY AC
-              </button>
-              <button id="btn-zen-pause" class="btn-action" title="Pause or Resume Stopwatch [Space]">
-                ${this.isPaused ? '[Space] RESUME' : '[Space] PAUSE'}
-              </button>
-              <button id="btn-zen-reset-bar" class="btn-action" title="Reset Stopwatch to 00:00 [z]">
-                [z] RESET 00:00
-              </button>
-            </div>
-          </div>
-
-          <div class="secondary-actions">
-            <span class="action-group-label">ASSIST & FLOW</span>
-            <button id="btn-zen-reveal-topic" class="btn-action-ghost" title="Anti-spoiler topic reveal [t]">
+        <!-- Clean Single-Row Workbench Toolbar (Zero Duplicate Buttons) -->
+        <div class="zen-workbench-toolbar">
+          <div class="workbench-left-tools">
+            <button id="btn-zen-reader" class="btn-pane-toggle ${this.isReaderOpen ? 'active' : ''}" title="Toggle Problem Statement & Samples Pane [r]">
+              [r] STATEMENT
+            </button>
+            <button id="btn-zen-notes" class="btn-pane-toggle ${this.isNotesOpen ? 'active' : ''}" title="Toggle Side-by-Side Scratchpad Pane [n]">
+              [n] SCRATCHPAD
+            </button>
+            <span class="toolbar-divider"></span>
+            <button id="btn-zen-cph-push" class="btn-cph-push" title="Push problem & real samples to local CPH / Competitive Companion [c]">
+              [c] CPH PUSH
+            </button>
+            <button id="btn-zen-cph" class="btn-cph-open" title="Open official AtCoder problem page in new tab [o]">
+              [o] ATCODER ↗
+            </button>
+            <button id="btn-zen-editorial" class="btn-action-ghost" title="Open official AtCoder editorial in new tab [e]">
+              [e] EDITORIAL ↗
+            </button>
+            <button id="btn-zen-reveal-topic" class="btn-action-ghost" title="Reveal algorithmic topic tag [t]">
               [t] TOPIC
             </button>
-            <button id="btn-zen-editorial" class="btn-action-ghost" title="Open official editorial [e]">
-              [e] EDITORIAL
+          </div>
+
+          <div class="workbench-right-verdicts">
+            <button id="btn-zen-verify" class="btn-solve-ac" title="Sync & Verify Accepted submission from AtCoder [v]">
+              ✓ [v] VERIFY AC
             </button>
-            <button id="btn-zen-skip" class="btn-action-ghost" title="Skip to next problem [s]">
+            <button id="btn-zen-attest" class="btn-attest-direct" title="Optimistically attest AC immediately without waiting for scraper lag [a]">
+              ⚡ [a] ATTEST AC
+            </button>
+            <span class="toolbar-divider"></span>
+            <button id="btn-zen-skip" class="btn-action-ghost" title="Skip to another problem in current channel [s]">
               [s] SKIP →
             </button>
-            <button id="btn-zen-giveup" class="btn-action-ghost btn-giveup" title="Surrender problem, reveal solution & record defeat [q]">
+            <button id="btn-zen-giveup" class="btn-action-ghost btn-giveup" title="Surrender problem, view editorial & record defeat [q]">
               [q] GIVE UP
             </button>
-            <button id="btn-zen-back" class="btn-action-ghost" title="Back to previous view [Esc]">
-              [Esc] ← BACK
-            </button>
           </div>
         </div>
 
-        <!-- Drawers for Reader and Notes -->
-        <div id="zen-reader-drawer" class="zen-drawer" style="display:none;"></div>
-        <div id="zen-notes-drawer" class="zen-drawer" style="display:none;"></div>
-
-        <!-- Problem Focus Note Card -->
-        <div class="zen-focus-card">
-          <div class="focus-card-header">
-            <span>QUICK REFERENCE & ERGONOMICS</span>
-            <span style="color:var(--text-muted)">Press [r] to read statement · Press [z] to reset timer · Press [v] when accepted</span>
-          </div>
-          <div class="focus-card-body">
-            <div class="quick-link-row">
-              <span>Official Problem Link:</span>
-              <a href="${problemUrl}" target="_blank" rel="noopener noreferrer">${problemUrl}</a>
-            </div>
-            <div class="quick-link-row">
-              <span>Official Editorial Link:</span>
-              <a href="${editorialUrl}" target="_blank" rel="noopener noreferrer">${editorialUrl}</a>
-            </div>
-            <div class="keyboard-legend">
-              <span class="key-pill">r</span> Reader
-              <span class="key-pill">c</span> Push CPH
-              <span class="key-pill">n</span> Notes
-              <span class="key-pill">Space</span> Pause
-              <span class="key-pill">z</span> Reset Timer
-              <span class="key-pill">v</span> Verify AC
-              <span class="key-pill">Enter</span> Attest AC
-              <span class="key-pill">o</span> AtCoder
-              <span class="key-pill">t</span> Topic
-              <span class="key-pill">e</span> Editorial
-              <span class="key-pill">s</span> Skip
-              <span class="key-pill">q</span> Give Up
-              <span class="key-pill">+/-</span> Bump Diff
-              <span class="key-pill">x</span> Contest
-              <span class="key-pill">g</span> Gauntlet
-              <span class="key-pill">Esc</span> Back
-            </div>
-          </div>
+        <!-- Side-by-Side Split Workbench Grid (Statement Reader + Scratchpad Notes) -->
+        <div id="zen-workbench-grid" class="zen-workbench-grid ${this.isReaderOpen && this.isNotesOpen ? 'split-two-col' : ''}">
+          <div id="zen-reader-drawer" class="zen-drawer" style="display:${this.isReaderOpen ? 'flex' : 'none'};"></div>
+          <div id="zen-notes-drawer" class="zen-drawer" style="display:${this.isNotesOpen ? 'flex' : 'none'};"></div>
         </div>
+
+        <!-- Minimal 1-Line Workbench Footer -->
+        <footer class="zen-workbench-footer">
+          <div class="footer-links">
+            <a href="${problemUrl}" target="_blank" rel="noopener noreferrer">Task: ${escapeHtml(prob.id || '')} ↗</a>
+            <span>·</span>
+            <a href="${editorialUrl}" target="_blank" rel="noopener noreferrer">Official Editorial ↗</a>
+          </div>
+          <div class="footer-shortcuts">
+            <span><kbd>Space</kbd> Pause</span>
+            <span><kbd>z</kbd> Reset 00:00</span>
+            <span><kbd>r</kbd> Statement</span>
+            <span><kbd>n</kbd> Split Notes</span>
+            <span><kbd>v</kbd> Verify AC</span>
+            <span><kbd>a</kbd> Attest AC</span>
+            <span><kbd>?</kbd> All Shortcuts</span>
+          </div>
+          <button id="btn-zen-end-session" class="btn-end-session-subtle" title="End and clear active problem timer">
+            × End Session
+          </button>
+        </footer>
       </div>
     `;
 
@@ -1467,12 +1506,11 @@ export class ZenFlowHUD {
    * Binds UI events and keyboard shortcuts.
    */
   attachEvents() {
-    // Top-left Back button and Breadcrumb Root
+    // Top-left Back button and Breadcrumb Root (keep timer running in background dock!)
     const btnNavBack = this.container.querySelector('#btn-zen-nav-back');
     if (btnNavBack) {
       btnNavBack.addEventListener('click', () => {
         audioEngine.playClick();
-        this.destroy();
         this.onExit();
       });
     }
@@ -1481,7 +1519,15 @@ export class ZenFlowHUD {
     if (crumbRoot) {
       crumbRoot.addEventListener('click', () => {
         audioEngine.playClick();
-        this.destroy();
+        this.onExit('table');
+      });
+    }
+
+    const btnEndSession = this.container.querySelector('#btn-zen-end-session');
+    if (btnEndSession) {
+      btnEndSession.addEventListener('click', () => {
+        audioEngine.playClick();
+        this.endSession();
         this.onExit('table');
       });
     }
@@ -1564,29 +1610,23 @@ export class ZenFlowHUD {
     if (btnExitScrim) {
       btnExitScrim.addEventListener('click', () => {
         audioEngine.playClick();
-        this.destroy();
         this.onExit();
       });
     }
 
-    // Pause buttons (toolbar & inline stopwatch)
-    const btnPause = this.container.querySelector('#btn-zen-pause');
-    if (btnPause) {
-      btnPause.addEventListener('click', () => this.togglePause());
+    // Stopwatch clock & inline Pause/Reset controls
+    const clockEl = this.container.querySelector('#zen-clock');
+    if (clockEl) {
+      clockEl.style.cursor = 'pointer';
+      clockEl.addEventListener('click', () => this.togglePause());
     }
     const btnInlinePause = this.container.querySelector('#btn-zen-inline-pause');
     if (btnInlinePause) {
       btnInlinePause.addEventListener('click', () => this.togglePause());
     }
-
-    // Reset Timer buttons (inline stopwatch & toolbar)
     const btnResetTimer = this.container.querySelector('#btn-zen-reset-timer');
     if (btnResetTimer) {
       btnResetTimer.addEventListener('click', () => this.resetTimer());
-    }
-    const btnResetBar = this.container.querySelector('#btn-zen-reset-bar');
-    if (btnResetBar) {
-      btnResetBar.addEventListener('click', () => this.resetTimer());
     }
 
     // Open AtCoder (in browser)
@@ -1595,7 +1635,7 @@ export class ZenFlowHUD {
       btnCph.addEventListener('click', () => this.openOfficialTask());
     }
 
-    // Verify AC
+    // Verify AC & Direct Attest AC
     const btnVerify = this.container.querySelector('#btn-zen-verify');
     if (btnVerify) {
       btnVerify.addEventListener('click', () => {
@@ -1606,11 +1646,19 @@ export class ZenFlowHUD {
         }
       });
     }
+    const btnAttest = this.container.querySelector('#btn-zen-attest');
+    if (btnAttest) {
+      btnAttest.addEventListener('click', () => this.handleSolve(true));
+    }
 
-    // Reveal topic
+    // Reveal topic (both toolbar button and topic pill)
     const btnTopic = this.container.querySelector('#btn-zen-reveal-topic');
     if (btnTopic) {
       btnTopic.addEventListener('click', () => this.revealCategory());
+    }
+    const topicTag = this.container.querySelector('#zen-topic-tag');
+    if (topicTag) {
+      topicTag.addEventListener('click', () => this.revealCategory());
     }
 
     // Editorial
@@ -1630,16 +1678,6 @@ export class ZenFlowHUD {
     if (btnSkip) {
       btnSkip.addEventListener('click', () => this.handleSkip('neutral'));
     }
-
-    // Back to previous view
-    const btnBack = this.container.querySelector('#btn-zen-back');
-    if (btnBack) {
-      btnBack.addEventListener('click', () => {
-        audioEngine.playClick();
-        this.destroy();
-        this.onExit();
-      });
-    }
   }
 
   /**
@@ -1654,7 +1692,6 @@ export class ZenFlowHUD {
       if (key === 'Escape') {
         e.preventDefault();
         activeEl.blur();
-        if (this.isNotesOpen) this.toggleNotes();
       }
       return;
     }
@@ -1751,6 +1788,9 @@ export class ZenFlowHUD {
     } else if (key === 'v') {
       e.preventDefault();
       this.handleSolve(false);
+    } else if (key === 'a' || key === 'A') {
+      e.preventDefault();
+      this.handleSolve(true);
     } else if (key === 't') {
       e.preventDefault();
       this.revealCategory();
@@ -1776,18 +1816,12 @@ export class ZenFlowHUD {
       e.preventDefault();
       this.handleSkip('neutral');
     } else if (key === 'Escape') {
-      if (this.isReaderOpen) {
-        e.preventDefault();
-        this.toggleReader();
-        return;
-      }
       if (this.isNotesOpen) {
         e.preventDefault();
         this.toggleNotes();
         return;
       }
       e.preventDefault();
-      this.destroy();
       this.onExit();
     }
   }

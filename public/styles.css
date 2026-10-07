@@ -2891,7 +2891,7 @@ body.hide-difficulty .zen-problem-title {
 }
 
 /* ==========================================================================
-   Zen Navigation Bar, Inline Stopwatch Controls & Grouped Action Clusters
+   Zen Navigation Bar, Split Workbench, Mini-Dock & Design Ergonomics
    ========================================================================== */
 
 .zen-nav-bar {
@@ -2903,6 +2903,31 @@ body.hide-difficulty .zen-problem-title {
   margin-bottom: 4px;
   border-bottom: 1px solid #1e1f26;
   flex-wrap: wrap;
+}
+
+.zen-nav-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.zen-nav-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.zen-inline-scope {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  background: #0c0d12;
+  border: 1px solid #1e1f26;
+  padding: 4px 8px;
+  border-radius: 3px;
 }
 
 .btn-nav-back {
@@ -2934,7 +2959,6 @@ body.hide-difficulty .zen-problem-title {
   font-family: var(--font-mono);
   font-size: 11px;
   color: var(--text-muted);
-  margin-right: auto;
 }
 
 .zen-breadcrumb .crumb-root {
@@ -3007,7 +3031,7 @@ body.hide-difficulty .zen-problem-title {
   color: var(--text-secondary);
   font-family: var(--font-mono);
   font-size: 11px;
-  padding: 3px 7px;
+  padding: 3px 8px;
   border-radius: 3px;
   cursor: pointer;
   transition: all 0.15s ease;
@@ -3035,36 +3059,418 @@ body.hide-difficulty .zen-problem-title {
   margin-top: 8px;
 }
 
-.zen-action-cluster {
+/* Single-Row Workbench Toolbar */
+.zen-workbench-toolbar {
   display: flex;
-  align-items: stretch;
+  align-items: center;
   justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  background: #0c0d12;
+  border: 1px solid #1e1f26;
+  border-radius: 4px;
+  flex-wrap: wrap;
+}
+
+.workbench-left-tools,
+.workbench-right-verdicts {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.toolbar-divider {
+  width: 1px;
+  height: 18px;
+  background: #252733;
+  margin: 0 2px;
+}
+
+.btn-pane-toggle {
+  background: #121318;
+  border: 1px solid #282a36;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-pane-toggle:hover {
+  border-color: var(--accent-cyan);
+  color: var(--text-primary);
+}
+
+.btn-pane-toggle.active {
+  background: rgba(66, 224, 224, 0.12);
+  border-color: var(--accent-cyan);
+  color: var(--accent-cyan);
+}
+
+.btn-attest-direct {
+  background: rgba(63, 175, 63, 0.1);
+  border: 1px solid rgba(63, 175, 63, 0.45);
+  color: #6ee7b7;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-attest-direct:hover {
+  background: rgba(63, 175, 63, 0.22);
+  border-color: var(--accent-green);
+  color: #ffffff;
+}
+
+.drawer-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.btn-drawer-action {
+  background: rgba(66, 224, 224, 0.08);
+  border: 1px solid rgba(66, 224, 224, 0.35);
+  color: var(--accent-cyan);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-drawer-action:hover {
+  background: var(--accent-cyan);
+  color: #08080a;
+}
+
+/* Side-by-Side Split Workbench Grid */
+.zen-workbench-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 14px;
+  align-items: stretch;
+}
+
+.zen-workbench-grid.split-two-col {
+  grid-template-columns: 1.35fr 1fr;
+}
+
+@media (max-width: 1024px) {
+  .zen-workbench-grid.split-two-col {
+    grid-template-columns: 1fr;
+  }
+}
+
+.zen-workbench-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  border-top: 1px solid #1a1b22;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  flex-wrap: wrap;
+}
+
+.zen-workbench-footer .footer-links {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.zen-workbench-footer .footer-links a {
+  color: var(--text-secondary);
+  text-decoration: none;
+}
+
+.zen-workbench-footer .footer-links a:hover {
+  color: var(--accent-cyan);
+  text-decoration: underline;
+}
+
+.zen-workbench-footer .footer-shortcuts {
+  display: flex;
+  align-items: center;
   gap: 12px;
   flex-wrap: wrap;
 }
 
-.action-group {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-  padding: 6px 10px;
-  background: #0b0c10;
-  border: 1px solid #1a1b22;
-  border-radius: 3px;
-}
-
-.action-group-label {
+.zen-workbench-footer kbd,
+.shortcut-row kbd {
+  background: #14151c;
+  border: 1px solid #282a36;
+  color: var(--accent-cyan);
+  padding: 1px 5px;
+  border-radius: 2px;
   font-family: var(--font-mono);
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  color: var(--text-muted);
-  text-transform: uppercase;
+  font-size: 10px;
 }
 
-.action-group-btns {
-  display: flex;
+.btn-end-session-subtle {
+  background: transparent;
+  border: 1px solid #282a36;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 3px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-end-session-subtle:hover {
+  border-color: #f87171;
+  color: #f87171;
+}
+
+/* Practice Table: Difficulty Preset Chips, Sortable Headers & Domain Pills */
+.diff-preset-group {
+  display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   flex-wrap: wrap;
 }
+
+.preset-chip {
+  background: #101116;
+  border: 1px solid #232530;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  padding: 4px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.preset-chip:hover {
+  border-color: var(--accent-cyan);
+  background: rgba(66, 224, 224, 0.06);
+}
+
+.preset-chip.active {
+  background: rgba(66, 224, 224, 0.14);
+  border-color: var(--accent-cyan);
+  color: var(--accent-cyan) !important;
+}
+
+.preset-chip.preset-zone {
+  color: var(--accent-cyan);
+}
+
+.sortable-col {
+  cursor: pointer;
+  user-select: none;
+  transition: color 0.15s ease;
+}
+
+.sortable-col:hover,
+.sortable-col.active-sort {
+  color: var(--accent-cyan);
+}
+
+.sort-indicator {
+  font-size: 9px;
+  margin-left: 3px;
+  color: var(--accent-cyan);
+}
+
+.domain-row-pill {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 6px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  color: #8b949e;
+  background: #14161f;
+  border: 1px solid #242736;
+  border-radius: 2px;
+  vertical-align: middle;
+}
+
+/* Persistent Active Session Mini-Dock */
+.active-session-dock {
+  position: fixed;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 950;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 8px 16px;
+  background: rgba(14, 16, 22, 0.96);
+  border: 1px solid var(--accent-cyan);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.75);
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  max-width: 92vw;
+  flex-wrap: wrap;
+}
+
+.dock-left,
+.dock-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.dock-status-pill {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 2px;
+}
+
+.dock-status-pill.running {
+  color: var(--accent-green);
+  background: rgba(63, 175, 63, 0.12);
+  border: 1px solid rgba(63, 175, 63, 0.4);
+}
+
+.dock-status-pill.paused {
+  color: var(--accent-amber);
+  background: rgba(255, 184, 54, 0.12);
+  border: 1px solid rgba(255, 184, 54, 0.4);
+}
+
+.dock-problem-title {
+  color: var(--text-primary);
+}
+
+.dock-diff-badge {
+  font-size: 10px;
+  color: var(--accent-cyan);
+  background: rgba(66, 224, 224, 0.08);
+  border: 1px solid rgba(66, 224, 224, 0.25);
+  padding: 1px 6px;
+  border-radius: 2px;
+}
+
+.dock-clock {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+  min-width: 48px;
+  text-align: center;
+}
+
+.btn-dock-open {
+  background: var(--accent-cyan);
+  border: 1px solid var(--accent-cyan);
+  color: #08080a;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.btn-dock-open:hover {
+  filter: brightness(1.1);
+}
+
+.btn-dock-end {
+  background: transparent;
+  border: 1px solid #282a36;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 2px 7px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.btn-dock-end:hover {
+  border-color: #f87171;
+  color: #f87171;
+}
+
+/* Global Keyboard Shortcuts Modal */
+.shortcuts-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  background: rgba(6, 7, 10, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.shortcuts-modal-card {
+  background: #0e1016;
+  border: 1px solid var(--accent-cyan);
+  border-radius: 4px;
+  max-width: 780px;
+  width: 100%;
+  padding: 20px 24px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.85);
+  font-family: var(--font-mono);
+}
+
+.shortcuts-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 12px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid #1e1f26;
+}
+
+.shortcuts-sub {
+  display: block;
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.shortcuts-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+}
+
+@media (max-width: 700px) {
+  .shortcuts-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.shortcuts-col h4 {
+  font-size: 11px;
+  color: var(--accent-cyan);
+  letter-spacing: 0.08em;
+  margin: 0 0 10px 0;
+}
+
+.shortcut-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 5px 0;
+  border-bottom: 1px solid #151720;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+

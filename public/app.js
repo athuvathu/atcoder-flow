@@ -92,6 +92,9 @@ class AtCoderFlowApp {
           <button id="btn-toggle-mute" class="btn-icon" title="Toggle Mechanical Audio [m]">
             <span id="btn-audio-label">[m] AUDIO: ON</span>
           </button>
+          <button id="btn-shortcuts-modal" class="btn-icon" title="Keyboard Shortcuts & Workflow Reference [?]">
+            <span>[?] KEYS</span>
+          </button>
         </div>
       </header>
 
@@ -101,6 +104,51 @@ class AtCoderFlowApp {
         <div id="view-techtree-section" style="display:none;"></div>
         <div id="view-zen-section" style="display:none;"></div>
       </main>
+
+      <!-- Persistent Active Problem Mini-Dock (visible on Table & Tech Tree when a problem timer is active) -->
+      <div id="active-session-dock" class="active-session-dock" style="display:none;"></div>
+
+      <!-- Global Keyboard Shortcuts & Workflow Modal -->
+      <div id="shortcuts-modal-overlay" class="shortcuts-modal-overlay" style="display:none;">
+        <div class="shortcuts-modal-card">
+          <div class="shortcuts-modal-header">
+            <div>
+              <strong>KEYBOARD SHORTCUTS & WORKFLOW HUD</strong>
+              <span class="shortcuts-sub">Designed for zero-mouse competitive programming flow</span>
+            </div>
+            <button id="btn-close-shortcuts" class="btn-drawer-close">[Esc / ?] CLOSE</button>
+          </div>
+          <div class="shortcuts-grid">
+            <div class="shortcuts-col">
+              <h4>GLOBAL & PRACTICE TABLE</h4>
+              <div class="shortcut-row"><kbd>j</kbd> / <kbd>k</kbd> <span>Move selection Down / Up in Table</span></div>
+              <div class="shortcut-row"><kbd>Enter</kbd> <span>Open selected problem in Workbench</span></div>
+              <div class="shortcut-row"><kbd>f</kbd> <span>Pull instant Flow problem (at your Par rating)</span></div>
+              <div class="shortcut-row"><kbd>1</kbd> / <kbd>2</kbd> / <kbd>3</kbd> <span>Pull Speed (-200) / Flow (Par) / Reach (+150)</span></div>
+              <div class="shortcut-row"><kbd>g</kbd> <span>Launch 3-Stage Gauntlet Run</span></div>
+              <div class="shortcut-row"><kbd>v</kbd> <span>Sync AC submissions from AtCoder / Kenkoooo</span></div>
+              <div class="shortcut-row"><kbd>u</kbd> <span>Switch active AtCoder handle</span></div>
+              <div class="shortcut-row"><kbd>m</kbd> <span>Toggle procedural mechanical audio</span></div>
+              <div class="shortcut-row"><kbd>Alt+←</kbd> <span>Browser Back through views & filters</span></div>
+            </div>
+            <div class="shortcuts-col">
+              <h4>PROBLEM WORKBENCH & STOPWATCH</h4>
+              <div class="shortcut-row"><kbd>Space</kbd> / <kbd>p</kbd> <span>Pause / Resume Stopwatch Timer</span></div>
+              <div class="shortcut-row"><kbd>z</kbd> <span>Reset Stopwatch Timer to 00:00</span></div>
+              <div class="shortcut-row"><kbd>r</kbd> <span>Toggle Problem Statement & Sample Cases</span></div>
+              <div class="shortcut-row"><kbd>n</kbd> <span>Toggle Side-by-Side Split Scratchpad</span></div>
+              <div class="shortcut-row"><kbd>v</kbd> <span>Verify AC via AtCoder / Kenkoooo API</span></div>
+              <div class="shortcut-row"><kbd>a</kbd> <span>Optimistically Attest AC immediately</span></div>
+              <div class="shortcut-row"><kbd>c</kbd> <span>Push problem + samples to local CPH editor</span></div>
+              <div class="shortcut-row"><kbd>o</kbd> / <kbd>e</kbd> <span>Open official AtCoder Task / Editorial ↗</span></div>
+              <div class="shortcut-row"><kbd>t</kbd> <span>Reveal hidden algorithmic topic tag</span></div>
+              <div class="shortcut-row"><kbd>s</kbd> / <kbd>q</kbd> <span>Skip problem / Give Up & view editorial</span></div>
+              <div class="shortcut-row"><kbd>-</kbd> / <kbd>+</kbd> / <kbd>0</kbd> <span>Bump target difficulty (-50 / +50 / Reset)</span></div>
+              <div class="shortcut-row"><kbd>Esc</kbd> <span>Return to previous view (timer stays in dock)</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
 
       <div class="toast-container" id="toast-container"></div>
     `;
@@ -127,14 +175,17 @@ class AtCoderFlowApp {
         this.fetchUserState();
         this.table.fetchProblems();
         this.updateWorkspaceTabUI();
+        this.updateActiveSessionDock();
       },
       onGiveUp: () => {
         this.fetchUserState();
         this.table.fetchProblems();
         this.updateWorkspaceTabUI();
+        this.updateActiveSessionDock();
       },
       onProblemChange: (prob) => {
         this.updateWorkspaceTabUI();
+        this.updateActiveSessionDock();
         if (prob && prob.id && !this._isRouting) {
           const targetHash = buildRouteHash({ view: 'zen', problemId: prob.id });
           if (window.location.hash !== targetHash) {
@@ -143,6 +194,9 @@ class AtCoderFlowApp {
           }
           this.switchViewDOM('zen');
         }
+      },
+      onTimerTick: () => {
+        this.updateActiveSessionDock();
       },
       onExit: (target) => this.handleBackFromZen(target)
     });
@@ -182,6 +236,14 @@ class AtCoderFlowApp {
     this.techTree.init();
   }
 
+  toggleShortcutsModal() {
+    audioEngine.playClick();
+    const modal = document.getElementById('shortcuts-modal-overlay');
+    if (!modal) return;
+    const isVisible = modal.style.display !== 'none';
+    modal.style.display = isVisible ? 'none' : 'flex';
+  }
+
   attachGlobalKeynav() {
     window.addEventListener('keydown', (e) => {
       const tag = document.activeElement ? document.activeElement.tagName.toLowerCase() : '';
@@ -189,13 +251,29 @@ class AtCoderFlowApp {
 
       const key = e.key;
 
+      // Global '?' shortcut modal toggle
+      if (key === '?') {
+        e.preventDefault();
+        this.toggleShortcutsModal();
+        return;
+      }
+
+      const shortcutsModal = document.getElementById('shortcuts-modal-overlay');
+      if (shortcutsModal && shortcutsModal.style.display !== 'none') {
+        if (key === 'Escape') {
+          e.preventDefault();
+          this.toggleShortcutsModal();
+        }
+        return;
+      }
+
       // When in Zen Mode, delegate to ZenFlowHUD
       if (this.currentView === 'zen') {
         this.zen.handleKeyDown(e);
         return;
       }
 
-      // In Table View
+      // In Table / Tech Tree View
       if (key === 'j') {
         e.preventDefault();
         this.table.moveDown();
@@ -293,6 +371,22 @@ class AtCoderFlowApp {
     if (btnMute) {
       btnMute.addEventListener('click', () => this.toggleMute());
     }
+
+    // Shortcuts Modal
+    const btnShortcuts = document.getElementById('btn-shortcuts-modal');
+    if (btnShortcuts) {
+      btnShortcuts.addEventListener('click', () => this.toggleShortcutsModal());
+    }
+    const btnCloseShortcuts = document.getElementById('btn-close-shortcuts');
+    if (btnCloseShortcuts) {
+      btnCloseShortcuts.addEventListener('click', () => this.toggleShortcutsModal());
+    }
+    const shortcutsOverlay = document.getElementById('shortcuts-modal-overlay');
+    if (shortcutsOverlay) {
+      shortcutsOverlay.addEventListener('click', (e) => {
+        if (e.target === shortcutsOverlay) this.toggleShortcutsModal();
+      });
+    }
   }
 
   /**
@@ -354,8 +448,15 @@ class AtCoderFlowApp {
       window.history.replaceState({ depth: 0 }, '', '#/table');
     }
 
+    // Hydrate saved problem into Zen controller in background if we aren't on #/problem
+    const savedProb = this.getSavedZenProblem();
+    if (savedProb && !this.zen.currentProblem) {
+      this.zen.currentProblem = savedProb;
+    }
+
     this.syncRouteFromUrl();
     this.updateWorkspaceTabUI();
+    this.updateActiveSessionDock();
   }
 
   navigateTo(routeOrHash, replace = false) {
@@ -399,8 +500,8 @@ class AtCoderFlowApp {
         }
         if (prob) {
           this.switchViewDOM('zen');
-          if (!this.zen.currentProblem || this.zen.currentProblem.id !== prob.id) {
-            this.zen.loadProblem(prob);
+          if (!this.zen.currentProblem || this.zen.currentProblem.id !== prob.id || !this.zen.container.innerHTML) {
+            this.zen.loadProblem(prob, true);
           }
         } else {
           window.history.replaceState({ depth: this.navHistoryDepth }, '', '#/table');
@@ -409,6 +510,7 @@ class AtCoderFlowApp {
       }
 
       this.updateWorkspaceTabUI();
+      this.updateActiveSessionDock();
     } finally {
       this._isRouting = false;
     }
@@ -451,6 +553,8 @@ class AtCoderFlowApp {
     if (viewName === 'techtree') {
       this.techTree.fetchTechTree();
     }
+
+    this.updateActiveSessionDock();
   }
 
   switchView(viewName) {
@@ -468,7 +572,7 @@ class AtCoderFlowApp {
 
   openZenMode(problem) {
     if (!problem) return;
-    if (this.zen.currentProblem && this.zen.currentProblem.id === problem.id) {
+    if (this.zen.currentProblem && this.zen.currentProblem.id === problem.id && this.zen.container.innerHTML) {
       this.navigateTo(buildRouteHash({ view: 'zen', problemId: problem.id }));
     } else {
       this.zen.loadProblem(problem);
@@ -503,6 +607,88 @@ class AtCoderFlowApp {
       zenTab.textContent = '⚡ FLOW WORKSPACE';
       zenTab.title = 'Launch or resume Flow problem workspace';
     }
+  }
+
+  /**
+   * Renders / updates the persistent bottom Mini-Dock when viewing Table or Tech Tree with an active problem.
+   */
+  updateActiveSessionDock() {
+    const dock = document.getElementById('active-session-dock');
+    if (!dock) return;
+
+    const activeProb = this.zen?.currentProblem || this.getSavedZenProblem();
+    if (!activeProb || this.currentView === 'zen') {
+      dock.style.display = 'none';
+      return;
+    }
+
+    dock.style.display = 'flex';
+    const timeStr = this.zen.formatTime(this.zen.elapsedSeconds || 0);
+    const isPaused = Boolean(this.zen.isPaused);
+    const contest = (activeProb.contest_id || '').toUpperCase();
+    const diff = activeProb.clipped_difficulty || 'N/A';
+
+    // If dock already mounted for this problem, just update live text to avoid killing button clicks
+    if (dock.dataset.probId === activeProb.id) {
+      const clockEl = dock.querySelector('#dock-clock-val');
+      const statusEl = dock.querySelector('#dock-status-pill');
+      const pauseBtn = dock.querySelector('#btn-dock-pause');
+      if (clockEl) clockEl.textContent = timeStr;
+      if (statusEl) {
+        statusEl.textContent = isPaused ? '❚❚ PAUSED' : '● ACTIVE SESSION';
+        statusEl.className = `dock-status-pill ${isPaused ? 'paused' : 'running'}`;
+      }
+      if (pauseBtn) pauseBtn.textContent = isPaused ? '▶ Resume' : '⏸ Pause';
+      return;
+    }
+
+    dock.dataset.probId = activeProb.id;
+    dock.innerHTML = `
+      <div class="dock-left">
+        <span id="dock-status-pill" class="dock-status-pill ${isPaused ? 'paused' : 'running'}">
+          ${isPaused ? '❚❚ PAUSED' : '● ACTIVE SESSION'}
+        </span>
+        <span class="dock-problem-title">
+          <strong>${contest}</strong> // ${activeProb.title || activeProb.id}
+        </span>
+        <span class="dock-diff-badge">DIFF ${diff}</span>
+      </div>
+      <div class="dock-right">
+        <span id="dock-clock-val" class="dock-clock">${timeStr}</span>
+        <button id="btn-dock-pause" class="btn-timer-ctrl" title="Pause / Resume Stopwatch">
+          ${isPaused ? '▶ Resume' : '⏸ Pause'}
+        </button>
+        <button id="btn-dock-reset" class="btn-timer-ctrl btn-timer-reset" title="Reset Stopwatch to 00:00">
+          ↺ Reset
+        </button>
+        <button id="btn-dock-resume" class="btn-dock-open" title="Return to Problem Workbench">
+          ⚡ Open Workspace →
+        </button>
+        <button id="btn-dock-close" class="btn-dock-end" title="End and clear active problem session">
+          ×
+        </button>
+      </div>
+    `;
+
+    dock.querySelector('#btn-dock-pause')?.addEventListener('click', () => {
+      if (!this.zen.timerInterval && this.zen.isPaused) {
+        this.zen.startTimer();
+      }
+      this.zen.togglePause();
+    });
+    dock.querySelector('#btn-dock-reset')?.addEventListener('click', () => {
+      this.zen.resetTimer();
+    });
+    dock.querySelector('#btn-dock-resume')?.addEventListener('click', () => {
+      audioEngine.playClick();
+      this.openZenMode(activeProb);
+    });
+    dock.querySelector('#btn-dock-close')?.addEventListener('click', () => {
+      audioEngine.playClick();
+      dock.dataset.probId = '';
+      this.zen.endSession();
+      this.showToast('Active problem session closed.');
+    });
   }
 
   toggleMute() {

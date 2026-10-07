@@ -44,15 +44,18 @@ export class PracticeTable {
     this.filteredProblems = [];
     this.selectedIndex = 0;
 
-    // Filters state
+    // Filters & Sort state
     this.contestFilter = 'ALL'; // ALL, ABC, ARC, AGC
-    this.minDiff = 1000;
-    this.maxDiff = 1500;
+    this.minDiff = 0;
+    this.maxDiff = 4000;
+    this.activePreset = 'ALL';
     this.categoryFilter = 'ALL';
     this.domainFilter = 'ALL';
     this.searchQuery = '';
     this.unsolvedOnly = false;
     this.hideDifficulty = false;
+    this.sortField = 'diff'; // 'diff' | 'contest' | 'title'
+    this.sortAsc = true;
 
     this.onProblemSelect = options.onProblemSelect || (() => {});
     this.onAudioClick = options.onAudioClick || (() => {});
@@ -68,8 +71,12 @@ export class PracticeTable {
     this.fetchProblems();
   }
 
+  renderTable() {
+    this.fetchProblems();
+  }
+
   /**
-   * Renders the layout skeleton including filter bar, keynav HUD, and table wrapper.
+   * Renders the layout skeleton including filter bar, difficulty band presets, and sortable table.
    */
   renderSkeleton() {
     this.container.innerHTML = `
@@ -85,11 +92,20 @@ export class PracticeTable {
         </div>
 
         <div class="filter-group">
-          <span class="filter-label">Diff:</span>
+          <span class="filter-label">Band:</span>
+          <div class="diff-preset-group" id="diff-preset-group">
+            <button class="preset-chip active" data-preset="ALL" title="All Golden Era problems (0–4000)">ALL</button>
+            <button class="preset-chip preset-zone" data-preset="ZONE" title="Problems within ±200 of your Training Rating">◎ MY ZONE</button>
+            <button class="preset-chip" data-preset="0-799" style="color:#B08C56" title="Gray / Brown (<800)">&lt;800</button>
+            <button class="preset-chip" data-preset="800-1199" style="color:#3FAF3F" title="Green (800–1199)">800–1200</button>
+            <button class="preset-chip" data-preset="1200-1599" style="color:#42E0E0" title="Cyan (1200–1599)">1200–1600</button>
+            <button class="preset-chip" data-preset="1600-1999" style="color:#8888FF" title="Blue (1600–1999)">1600–2000</button>
+            <button class="preset-chip" data-preset="2000-4000" style="color:#FFFF56" title="Yellow / Orange / Red (2000+)">2000+</button>
+          </div>
           <div class="diff-range-container">
-            <input type="number" id="min-diff-input" class="diff-input" value="${this.minDiff}" step="50" min="0" max="4000" />
+            <input type="number" id="min-diff-input" class="diff-input" value="${this.minDiff}" step="50" min="0" max="4000" title="Minimum difficulty" />
             <span style="color:var(--text-muted)">–</span>
-            <input type="number" id="max-diff-input" class="diff-input" value="${this.maxDiff}" step="50" min="0" max="4000" />
+            <input type="number" id="max-diff-input" class="diff-input" value="${this.maxDiff}" step="50" min="0" max="4000" title="Maximum difficulty" />
           </div>
         </div>
 
@@ -101,12 +117,12 @@ export class PracticeTable {
         </div>
 
         <div class="filter-group">
-          <input type="text" id="table-search-input" class="search-input" placeholder="Search problem (title/id)..." />
+          <input type="text" id="table-search-input" class="search-input" placeholder="Search problem (title / id)..." />
         </div>
 
         <div class="filter-group">
           <button id="toggle-hide-diff-btn" class="toggle-switch-btn ${this.hideDifficulty ? 'active' : ''}">
-            Blind Practice: ${this.hideDifficulty ? 'ON' : 'OFF'}
+            Blind: ${this.hideDifficulty ? 'ON' : 'OFF'}
           </button>
           <button id="toggle-unsolved-btn" class="toggle-switch-btn ${this.unsolvedOnly ? 'active' : ''}">
             Unsolved Only
@@ -116,24 +132,29 @@ export class PracticeTable {
 
       <div class="keynav-status-bar">
         <div>
-          <span>Navigation:</span>
-          <span class="key-badge">j</span> / <span class="key-badge">k</span> move
-          <span class="key-badge">Enter</span> activate Zen
-          <span class="key-badge">v</span> verify AC
-          <span class="key-badge">h</span> hint
-          <span class="key-badge">s</span> skip
-          <span class="key-badge">m</span> mute
+          <span>Keys:</span>
+          <span class="key-badge">j</span>/<span class="key-badge">k</span> move
+          <span class="key-badge">Enter</span> open workspace
+          <span class="key-badge">f</span> instant flow
+          <span class="key-badge">g</span> gauntlet
+          <span class="key-badge">?</span> all shortcuts
         </div>
         <div id="table-count-badge">Loaded 0 problems</div>
       </div>
 
       <div class="table-wrapper">
         <div class="practice-table" id="practice-table-body">
-          <div class="table-row header">
+          <div class="table-row header" id="table-sort-header">
             <div class="col-status">STATUS</div>
-            <div class="col-contest">CONTEST</div>
-            <div class="col-title">PROBLEM TITLE</div>
-            <div class="col-diff">DIFF</div>
+            <div class="col-contest sortable-col" data-sort="contest" title="Click to sort by Contest ID">
+              CONTEST <span class="sort-indicator" id="sort-ind-contest"></span>
+            </div>
+            <div class="col-title sortable-col" data-sort="title" title="Click to sort by Problem Title">
+              PROBLEM TITLE <span class="sort-indicator" id="sort-ind-title"></span>
+            </div>
+            <div class="col-diff sortable-col active-sort" data-sort="diff" title="Click to sort by Difficulty">
+              DIFF <span class="sort-indicator" id="sort-ind-diff">▲</span>
+            </div>
             <div class="col-action">ACTION</div>
           </div>
           <div id="table-rows-container">
@@ -145,7 +166,7 @@ export class PracticeTable {
   }
 
   /**
-   * Binds UI events for filters, inputs, and buttons.
+   * Binds UI events for filters, presets, sortable headers, inputs, and buttons.
    */
   attachEventListeners() {
     // Contest buttons
@@ -167,17 +188,71 @@ export class PracticeTable {
       });
     }
 
-    // Difficulty inputs
+    // Difficulty preset chips
+    const presetGroup = this.container.querySelector('#diff-preset-group');
     const minInput = this.container.querySelector('#min-diff-input');
     const maxInput = this.container.querySelector('#max-diff-input');
+
+    if (presetGroup) {
+      presetGroup.addEventListener('click', (e) => {
+        const btn = e.target.closest('.preset-chip');
+        if (!btn) return;
+        this.onAudioClick();
+        presetGroup.querySelectorAll('.preset-chip').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        const preset = btn.dataset.preset;
+        this.activePreset = preset;
+
+        if (preset === 'ALL') {
+          this.minDiff = 0;
+          this.maxDiff = 4000;
+        } else if (preset === 'ZONE') {
+          const tr = flowStore.getUserState()?.training_rating || 1200;
+          this.minDiff = Math.max(0, Math.round(tr - 200));
+          this.maxDiff = Math.min(4000, Math.round(tr + 200));
+        } else {
+          const [lo, hi] = preset.split('-').map(Number);
+          this.minDiff = lo;
+          this.maxDiff = hi;
+        }
+
+        if (minInput) minInput.value = this.minDiff;
+        if (maxInput) maxInput.value = this.maxDiff;
+        this.applyFilters();
+      });
+    }
+
+    // Difficulty numeric inputs
     if (minInput && maxInput) {
       const handleDiffChange = () => {
         this.minDiff = parseInt(minInput.value, 10) || 0;
         this.maxDiff = parseInt(maxInput.value, 10) || 4000;
+        if (presetGroup) {
+          presetGroup.querySelectorAll('.preset-chip').forEach(b => b.classList.remove('active'));
+        }
         this.applyFilters();
       };
       minInput.addEventListener('change', handleDiffChange);
       maxInput.addEventListener('change', handleDiffChange);
+    }
+
+    // Sortable column headers
+    const sortHeader = this.container.querySelector('#table-sort-header');
+    if (sortHeader) {
+      sortHeader.addEventListener('click', (e) => {
+        const col = e.target.closest('.sortable-col');
+        if (!col) return;
+        this.onAudioClick();
+        const field = col.dataset.sort;
+        if (this.sortField === field) {
+          this.sortAsc = !this.sortAsc;
+        } else {
+          this.sortField = field;
+          this.sortAsc = field === 'contest' ? false : true;
+        }
+        this.updateSortHeaderUI();
+        this.applyFilters();
+      });
     }
 
     // Search input
@@ -248,6 +323,18 @@ export class PracticeTable {
     }
   }
 
+  updateSortHeaderUI() {
+    const fields = ['contest', 'title', 'diff'];
+    fields.forEach(f => {
+      const ind = this.container.querySelector(`#sort-ind-${f}`);
+      const col = this.container.querySelector(`.sortable-col[data-sort="${f}"]`);
+      if (col) col.classList.toggle('active-sort', this.sortField === f);
+      if (ind) {
+        ind.textContent = this.sortField === f ? (this.sortAsc ? '▲' : '▼') : '';
+      }
+    });
+  }
+
   /**
    * Sets the blind practice mode state.
    * @param {boolean} hide
@@ -258,7 +345,7 @@ export class PracticeTable {
     const btn = this.container.querySelector('#toggle-hide-diff-btn');
     if (btn) {
       btn.classList.toggle('active', hide);
-      btn.textContent = `Blind Practice: ${hide ? 'ON' : 'OFF'}`;
+      btn.textContent = `Blind: ${hide ? 'ON' : 'OFF'}`;
     }
     this.renderRows();
   }
@@ -341,10 +428,10 @@ export class PracticeTable {
   }
 
   /**
-   * Applies active filters and renders matching problem rows.
+   * Applies active filters and sorting, then renders matching problem rows.
    */
   applyFilters() {
-    this.filteredProblems = this.problems.filter(prob => {
+    const filtered = this.problems.filter(prob => {
       // Contest filter
       if (this.contestFilter !== 'ALL') {
         const c = (prob.contest_id || '').toLowerCase();
@@ -359,7 +446,7 @@ export class PracticeTable {
       }
 
       // Difficulty range bounds
-      const diff = prob.difficulty !== null ? prob.difficulty : -9999;
+      const diff = prob.difficulty !== null ? clipDifficulty(prob.difficulty) : -9999;
       if (diff < this.minDiff || diff > this.maxDiff) return false;
 
       // Category filter
@@ -381,6 +468,21 @@ export class PracticeTable {
 
       return true;
     });
+
+    const dir = this.sortAsc ? 1 : -1;
+    filtered.sort((a, b) => {
+      if (this.sortField === 'contest') {
+        return (a.id || '').localeCompare(b.id || '', undefined, { numeric: true }) * dir;
+      }
+      if (this.sortField === 'title') {
+        return (a.title || '').localeCompare(b.title || '') * dir;
+      }
+      const da = a.difficulty !== null ? a.difficulty : 99999;
+      const db = b.difficulty !== null ? b.difficulty : 99999;
+      return (da - db) * dir;
+    });
+
+    this.filteredProblems = filtered;
 
     if (this.selectedIndex >= this.filteredProblems.length) {
       this.selectedIndex = Math.max(0, this.filteredProblems.length - 1);
@@ -416,6 +518,8 @@ export class PracticeTable {
       const fillPct = calculateDotFill(prob.difficulty);
       const isSolved = Boolean(prob.is_solved);
       const clippedDiff = clipDifficulty(prob.difficulty);
+      const domainKey = classifyProblemDomain(prob);
+      const domainLabel = domainKey.replace(/_/g, ' ').toUpperCase();
 
       // Dot background style
       let dotStyle = '';
@@ -440,7 +544,8 @@ export class PracticeTable {
           </div>
           <div class="col-contest">${(prob.contest_id || '').toUpperCase()}</div>
           <div class="col-title" style="color: ${titleColor};">
-            <a href="#" class="problem-link" data-id="${prob.id}">${prob.title || prob.id}</a>
+            <a href="#/problem/${encodeURIComponent(prob.id)}" class="problem-link" data-id="${prob.id}">${prob.title || prob.id}</a>
+            <span class="domain-row-pill">${domainLabel}</span>
             ${prob.category ? `<span class="category-tag">${prob.category}</span>` : ''}
           </div>
           <div class="col-diff">
@@ -448,7 +553,7 @@ export class PracticeTable {
             <span class="diff-value" style="color:${band.hex}">${clippedDiff !== null ? clippedDiff : '-'}</span>
           </div>
           <div class="col-action">
-            <button class="btn-table-action" data-id="${prob.id}">ZEN</button>
+            <button class="btn-table-action" data-id="${prob.id}">SOLVE →</button>
           </div>
         </div>
       `;
