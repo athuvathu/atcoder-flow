@@ -948,14 +948,15 @@ class AtCoderFlowApp {
           <span class="shortcuts-sub">Solve problems (or beat Par / hit Frontier Leaps) to unlock higher-rarity SFW character cards (${cards.length} collected · ${ssrCount} SSR · ${srCount} SR)</span>
         </div>
         <div style="display:flex; gap:8px; align-items:center;">
-          <button id="btn-roll-gacha-now" class="btn-flow-launch" title="Roll a new SFW Anime Artwork Card right now">🎲 ROLL NEW CARD</button>
+          <button id="btn-roll-gacha-now" class="btn-flow-launch" title="Roll a new Anime Artwork Card from Waifu.im right now">🎲 ROLL NEW CARD</button>
+          ${cards.length > 0 ? `<button id="btn-clear-vault" class="btn-drawer-close" title="Clear all cards from Vault">🗑 CLEAR ALL</button>` : ''}
           <button id="btn-close-cards-modal" class="btn-drawer-close">[Esc] CLOSE</button>
         </div>
       </div>
 
       ${cards.length === 0 ? `
         <div class="cards-empty-state">
-          <p>No reward cards unlocked yet. Every verified or attested <strong>AC Solve</strong> automatically drops a new SFW Anime Artwork Card!</p>
+          <p>No reward cards unlocked yet. Every verified or attested <strong>AC Solve</strong> automatically drops a new Waifu.im Artwork Card!</p>
           <button id="btn-roll-first-card" class="btn-zen-primary" style="margin-top:10px;">🎲 Roll Your First Starter Card</button>
         </div>
       ` : `
@@ -968,7 +969,7 @@ class AtCoderFlowApp {
               </div>
               <div class="rvc-info">
                 <div class="rvc-title" title="${c.character || ''}">${c.character || 'Anime Illustration'}</div>
-                <div class="rvc-meta">Art: ${c.artist || 'Illustrator'} · <span style="color:var(--accent-cyan);">${(c.problemId || 'AC').toUpperCase()} (${c.problemDiff || 1200})</span></div>
+                <div class="rvc-meta">Art: ${c.artist || 'Illustrator'} · <span style="color:var(--accent-cyan);">${(c.problemId || 'AC').toUpperCase()} (${Math.max(100, c.problemDiff || 1200)})</span></div>
                 <div class="rvc-actions">
                   <a href="${c.fullUrl || c.imageUrl}" target="_blank" rel="noopener" class="btn-copy-sample">FULL ART ↗</a>
                   <button class="btn-copy-sample btn-del-card" data-id="${c.id}" title="Remove from Vault">✕</button>
@@ -981,6 +982,12 @@ class AtCoderFlowApp {
     `;
 
     document.getElementById('btn-close-cards-modal')?.addEventListener('click', () => this.closeCardsGalleryModal());
+    document.getElementById('btn-clear-vault')?.addEventListener('click', () => {
+      flowStore.clearRewardCards();
+      this.updateHudDOM();
+      this.renderCardsGalleryContent();
+      this.showToast('Cleared all cards from Vault.');
+    });
 
     const rollHandler = async (btn) => {
       if (!btn) return;

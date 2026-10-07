@@ -352,12 +352,20 @@ class FlowStoreClass {
   }
 
   /**
-   * Rolls a new SFW Anime Character Artwork Card from `https://api.waifu.im/search`
-   * (with automatic fallback to `nekosia.cat` and `pic.re` if waifu.im returns Cloudflare 403/522)
+   * Clears all cards from the collection.
+   */
+  clearRewardCards() {
+    this.userState.card_collection = [];
+    this.saveToLocalStorage();
+  }
+
+  /**
+   * Rolls a new Anime Character Artwork Card directly from Waifu.im v7 API (`https://api.waifu.im/images`)
    * and saves it to `card_collection`.
    */
   async rollRewardCard(problem = null, solveRes = null) {
-    const diff = Math.round(problem?.clipped_difficulty ?? problem?.difficulty ?? this.userState.training_rating ?? 1200);
+    const rawDiff = problem?.clipped_difficulty ?? problem?.difficulty ?? this.userState.training_rating ?? 1200;
+    const diff = Math.max(100, Math.round(rawDiff));
     let rarity = 'N // INITIATE';
     let rarityTier = 'N';
     let rarityColor = '#94a3b8';
@@ -376,96 +384,45 @@ class FlowStoreClass {
       rarityColor = '#2ecc71';
     }
 
-    let cardData = null;
-
-    // 1. Primary API: waifu.im (https://api.waifu.im/search)
-    const waifuImUrl = 'https://api.waifu.im/search?is_nsfw=true';
-    try {
-      const res = await fetch(waifuImUrl, {
-        headers: { Accept: 'application/json' },
-        cache: 'no-store'
-      });
-      if (res.ok) {
-        const d = await res.json();
-        const img = Array.isArray(d?.images) ? d.images[0] : null;
-        if (img && img.url) {
-          const tagNames = Array.isArray(img.tags) ? img.tags.map(t => t.name).filter(Boolean) : ['anime'];
-          cardData = {
-            id: `card_${img.image_id || Date.now()}_${Math.floor(Math.random() * 1000)}`,
-            imageUrl: img.url,
-            fullUrl: img.url,
-            rarity,
-            rarityTier,
-            rarityColor,
-            category: tagNames[0] || 'anime',
-            tags: tagNames.slice(0, 5),
-            character: tagNames.join(' · ') || 'Anime Illustration',
-            artist: img?.artist?.name || 'Waifu.im Artist',
-            sourceUrl: img.source || img.url,
-            problemId: problem?.id || 'bonus_roll',
-            problemTitle: problem?.title || 'XP Gacha Roll',
-            problemDiff: diff,
-            unlockedAt: new Date().toISOString()
-          };
-        }
-      }
-    } catch (_) {}
-
-    // 2. Fallback API (if waifu.im returns Cloudflare 403/522): Nekosia.cat
-    if (!cardData) {
-      try {
-        const res = await fetch('https://api.nekosia.cat/api/v1/images/cute', { cache: 'no-store' });
-        if (res.ok) {
-          const d = await res.json();
-          const imgUrl = d?.image?.compressed?.url || d?.image?.original?.url;
-          if (imgUrl) {
-            cardData = {
-              id: `card_${d.id || Date.now()}_${Math.floor(Math.random() * 1000)}`,
-              imageUrl: imgUrl,
-              fullUrl: d?.image?.original?.url || imgUrl,
-              rarity,
-              rarityTier,
-              rarityColor,
-              category: d.category || 'anime',
-              tags: Array.isArray(d.tags) ? d.tags.slice(0, 5) : [],
-              character: d?.anime?.character || d?.anime?.title || d.category || 'Anime Illustration',
-              artist: d?.attribution?.artist?.username || 'Pixiv Artist',
-              sourceUrl: d?.source?.url || d?.attribution?.artist?.profile || imgUrl,
-              problemId: problem?.id || 'bonus_roll',
-              problemTitle: problem?.title || 'XP Gacha Roll',
-              problemDiff: diff,
-              unlockedAt: new Date().toISOString()
-            };
-          }
-        }
-      } catch (_) {}
+    const waifuImUrl = 'https://api.waifu.im/images';
+    const res = await fetch(waifuImUrl, {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store'
+    });
+    if (!res.ok) {
+      throw new Error(`Waifu.im API HTTP ${res.status}`);
     }
 
-    // 3. Secondary Fallback API: Pic.re
-    if (!cardData) {
-      const res = await fetch('https://pic.re/image.json', { cache: 'no-store' });
-      if (!res.ok) throw new Error('Could not reach anime art API');
-      const d = await res.json();
-      const rawUrl = d.file_url || '';
-      const imgUrl = rawUrl.startsWith('http') ? rawUrl : `https://${rawUrl}`;
-      cardData = {
-        id: `card_${d.md5 || Date.now()}_${Math.floor(Math.random() * 1000)}`,
-        imageUrl: imgUrl,
-        fullUrl: imgUrl,
-        rarity,
-        rarityTier,
-        rarityColor,
-        category: (d.tags && d.tags[0]) || 'illustration',
-        tags: Array.isArray(d.tags) ? d.tags.slice(0, 5) : [],
-        character: (d.tags && d.tags[0]) || 'Anime Illustration',
-        artist: d.author || 'Illustrator',
-        sourceUrl: d.source || imgUrl,
-        problemId: problem?.id || 'bonus_roll',
-        problemTitle: problem?.title || 'XP Gacha Roll',
-        problemDiff: diff,
-        unlockedAt: new Date().toISOString()
-      };
+    const d = await res.json();
+    const img = Array.isArray(d?.items) ? d.items[0] : (Array.isArray(d?.images) ? d.images[0] : null);
+    if (!img || !img.url) {
+      throw new Error('Waifu.im returned empty items');
     }
+
+    const tagNames = Array.isArray(img.tags)
+      ? img.tags.map(t => t.name || t.slug).filter(Boolean)
+      : ['Waifu'];
+    const artistName = (Array.isArray(img.artists) && img.artists[0]?.name)
+      || img?.artist?.name
+      || 'Waifu.im Artist';
+
+    const cardData = {
+      id: `card_${img.id || img.image_id || Date.now()}_${Math.floor(Math.random() * 1000)}`,
+      imageUrl: img.url,
+      fullUrl: img.url,
+      rarity,
+      rarityTier,
+      rarityColor,
+      category: tagNames[0] || 'Waifu',
+      tags: tagNames.slice(0, 5),
+      character: tagNames.join(' · ') || 'Waifu Illustration',
+      artist: artistName,
+      sourceUrl: img.source || img.url,
+      problemId: problem?.id || 'bonus_roll',
+      problemTitle: problem?.title || 'XP Gacha Roll',
+      problemDiff: diff,
+      unlockedAt: new Date().toISOString()
+    };
 
     if (!Array.isArray(this.userState.card_collection)) {
       this.userState.card_collection = [];
