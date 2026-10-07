@@ -1076,6 +1076,10 @@ export class ZenFlowHUD {
           <span>Training Rating: <strong style="color:${atTr.color};">${data.training_rating}</strong> (+${data.rating_delta}) <span style="color:${cfTr.color}; margin-left:4px;">[CF ${cfTr.cfRating} ${cfTr.title}]</span></span>
         </div>
 
+        <div id="ac-reward-card-slot" class="ac-reward-card-slot">
+          <div class="ac-reward-loading">🃏 Rolling SFW Anime Artwork Reward Card...</div>
+        </div>
+
         <div class="jackpot-next-prompt">
           ${nextPromptHtml}
         </div>
@@ -1083,6 +1087,28 @@ export class ZenFlowHUD {
     `;
 
     this.container.appendChild(overlay);
+
+    // Roll SFW Anime Artwork Reward Card asynchronously so we never block AC celebration
+    const probSnapshot = this.currentProblem;
+    flowStore.rollRewardCard(probSnapshot, data).then(card => {
+      this.onSolveAC(); // Refresh HUD card count
+      const slot = overlay.querySelector('#ac-reward-card-slot');
+      if (!slot || !card) return;
+      slot.innerHTML = `
+        <div class="ac-reward-card-preview" style="border-color:${card.rarityColor};">
+          <img src="${escapeHtml(card.imageUrl)}" alt="Anime Reward Card" class="ac-reward-thumb" loading="lazy" />
+          <div class="ac-reward-meta">
+            <span class="ac-reward-rarity" style="color:${card.rarityColor};">[ ★ UNLOCKED CARD: ${escapeHtml(card.rarity)} ]</span>
+            <strong class="ac-reward-title">${escapeHtml(card.character)}</strong>
+            <span class="ac-reward-sub">Art by ${escapeHtml(card.artist)} · Saved to [i] Card Vault (${flowStore.getCardCollection().length} total)</span>
+          </div>
+          <a href="${escapeHtml(card.fullUrl)}" target="_blank" rel="noopener" class="btn-action-ghost" style="font-size:10px; padding:4px 8px;">FULL ART ↗</a>
+        </div>
+      `;
+    }).catch(() => {
+      const slot = overlay.querySelector('#ac-reward-card-slot');
+      if (slot) slot.innerHTML = '';
+    });
 
     // Odometer number roll-up animation
     this.animateOdometer(overlay.querySelector('#odometer-val'), data.solve_performance - 150, data.solve_performance);

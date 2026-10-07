@@ -259,6 +259,7 @@ class FlowStoreClass {
       solved_ids: [],
       review_list: [],
       solve_log: [],
+      card_collection: [],
       preferences: { muted: false, mode: 'flow', gauntlet_preset: 'escalation' }
     };
   }
@@ -311,6 +312,7 @@ class FlowStoreClass {
 
     if (!Array.isArray(this.userState.review_list)) this.userState.review_list = [];
     if (!Array.isArray(this.userState.solve_log)) this.userState.solve_log = [];
+    if (!Array.isArray(this.userState.card_collection)) this.userState.card_collection = [];
     this.solvedSet = new Set(this.userState.solved_ids || []);
     this.userState.solved_count = this.solvedSet.size;
   }
@@ -327,8 +329,118 @@ class FlowStoreClass {
     return {
       ...this.userState,
       solved_count: this.solvedSet.size,
-      review_count: (this.userState.review_list || []).length
+      review_count: (this.userState.review_list || []).length,
+      card_count: (this.userState.card_collection || []).length
     };
+  }
+
+  /**
+   * Returns all unlocked SFW Anime Artwork Reward Cards.
+   */
+  getCardCollection() {
+    if (!Array.isArray(this.userState.card_collection)) this.userState.card_collection = [];
+    return this.userState.card_collection;
+  }
+
+  /**
+   * Deletes a card from the collection by ID.
+   */
+  deleteRewardCard(cardId) {
+    if (!Array.isArray(this.userState.card_collection)) return;
+    this.userState.card_collection = this.userState.card_collection.filter(c => c.id !== cardId);
+    this.saveToLocalStorage();
+  }
+
+  /**
+   * Rolls a new SFW Anime Character Artwork Card from public CORS-enabled SFW anime art APIs
+   * (`https://api.nekosia.cat/api/v1/images/cute` with fallback to `https://pic.re/image.json`)
+   * and saves it to `card_collection`.
+   */
+  async rollRewardCard(problem = null, solveRes = null) {
+    const diff = Math.round(problem?.clipped_difficulty ?? problem?.difficulty ?? this.userState.training_rating ?? 1200);
+    let rarity = 'N // INITIATE';
+    let rarityTier = 'N';
+    let rarityColor = '#94a3b8';
+
+    if (diff >= 2000 || solveRes?.is_frontier_leap) {
+      rarity = 'SSR // MYTHIC';
+      rarityTier = 'SSR';
+      rarityColor = '#f1c40f';
+    } else if (diff >= 1600 || solveRes?.beat_par) {
+      rarity = 'SR // ELITE';
+      rarityTier = 'SR';
+      rarityColor = '#00e5ff';
+    } else if (diff >= 1200) {
+      rarity = 'R // VANGUARD';
+      rarityTier = 'R';
+      rarityColor = '#2ecc71';
+    }
+
+    let cardData = null;
+
+    // Primary SFW API: Nekosia.cat (CORS: *, rating: safe)
+    try {
+      const res = await fetch('https://api.nekosia.cat/api/v1/images/cute', { cache: 'no-store' });
+      if (res.ok) {
+        const d = await res.json();
+        const imgUrl = d?.image?.compressed?.url || d?.image?.original?.url;
+        if (imgUrl) {
+          cardData = {
+            id: `card_${d.id || Date.now()}_${Math.floor(Math.random() * 1000)}`,
+            imageUrl: imgUrl,
+            fullUrl: d?.image?.original?.url || imgUrl,
+            rarity,
+            rarityTier,
+            rarityColor,
+            category: d.category || 'anime',
+            tags: Array.isArray(d.tags) ? d.tags.slice(0, 5) : [],
+            character: d?.anime?.character || d?.anime?.title || d.category || 'Anime Illustration',
+            artist: d?.attribution?.artist?.username || 'Pixiv Artist',
+            sourceUrl: d?.source?.url || d?.attribution?.artist?.profile || imgUrl,
+            problemId: problem?.id || 'bonus_roll',
+            problemTitle: problem?.title || 'XP Gacha Roll',
+            problemDiff: diff,
+            unlockedAt: new Date().toISOString()
+          };
+        }
+      }
+    } catch (_) {}
+
+    // Fallback SFW API: Pic.re (CORS: *)
+    if (!cardData) {
+      const res = await fetch('https://pic.re/image.json', { cache: 'no-store' });
+      if (!res.ok) throw new Error('Could not reach SFW anime art API');
+      const d = await res.json();
+      const rawUrl = d.file_url || '';
+      const imgUrl = rawUrl.startsWith('http') ? rawUrl : `https://${rawUrl}`;
+      cardData = {
+        id: `card_${d.md5 || Date.now()}_${Math.floor(Math.random() * 1000)}`,
+        imageUrl: imgUrl,
+        fullUrl: imgUrl,
+        rarity,
+        rarityTier,
+        rarityColor,
+        category: (d.tags && d.tags[0]) || 'illustration',
+        tags: Array.isArray(d.tags) ? d.tags.slice(0, 5) : [],
+        character: (d.tags && d.tags[0]) || 'Anime Illustration',
+        artist: d.author || 'Illustrator',
+        sourceUrl: d.source || imgUrl,
+        problemId: problem?.id || 'bonus_roll',
+        problemTitle: problem?.title || 'XP Gacha Roll',
+        problemDiff: diff,
+        unlockedAt: new Date().toISOString()
+      };
+    }
+
+    if (!Array.isArray(this.userState.card_collection)) {
+      this.userState.card_collection = [];
+    }
+    this.userState.card_collection.unshift(cardData);
+    if (this.userState.card_collection.length > 200) {
+      this.userState.card_collection = this.userState.card_collection.slice(0, 200);
+    }
+    this.saveToLocalStorage();
+    return cardData;
   }
 
   setHandle(newHandle) {

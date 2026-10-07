@@ -84,6 +84,9 @@ class AtCoderFlowApp {
           <button id="btn-cmd-palette" class="btn-icon btn-cmd-trigger" title="Universal Command Palette: Search 954 problems, jump rating, or run actions [Ctrl+K or /]">
             <span>[Ctrl+K] ⌘ SEARCH</span>
           </button>
+          <button id="btn-cards-gallery" class="btn-icon" title="Open SFW Anime Artwork Reward Card Vault [i]">
+            <span id="btn-cards-label">[i] 🃏 VAULT (0)</span>
+          </button>
           <button id="btn-gauntlet-session" class="btn-gauntlet-launch" title="Launch 3-Problem Flow Gauntlet (Warmup -> Flow -> Boss) [g]">
             [g] GAUNTLET
           </button>
@@ -115,6 +118,11 @@ class AtCoderFlowApp {
       <!-- Rating Calibrator, Frontier Settings & Telemetry Modal -->
       <div id="rating-telemetry-overlay" class="shortcuts-modal-overlay" style="display:none;">
         <div class="shortcuts-modal-card rating-telemetry-card" id="rating-telemetry-body"></div>
+      </div>
+
+      <!-- SFW Anime Artwork Reward Card Vault Modal -->
+      <div id="cards-gallery-overlay" class="shortcuts-modal-overlay" style="display:none;">
+        <div class="shortcuts-modal-card rating-telemetry-card" id="cards-gallery-body"></div>
       </div>
 
       <!-- Universal Command Palette (Ctrl+K / /) -->
@@ -293,6 +301,15 @@ class AtCoderFlowApp {
         return;
       }
 
+      const cardsOverlay = document.getElementById('cards-gallery-overlay');
+      if (cardsOverlay && cardsOverlay.style.display !== 'none') {
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          this.closeCardsGalleryModal();
+        }
+        return;
+      }
+
       const tag = document.activeElement ? document.activeElement.tagName.toLowerCase() : '';
       if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
 
@@ -302,6 +319,13 @@ class AtCoderFlowApp {
       if (key === '/') {
         e.preventDefault();
         this.openCommandPalette();
+        return;
+      }
+
+      // 'i' opens SFW Anime Artwork Card Vault
+      if (key === 'i') {
+        e.preventDefault();
+        this.openCardsGalleryModal();
         return;
       }
 
@@ -384,6 +408,18 @@ class AtCoderFlowApp {
     const solvedPill = document.getElementById('hud-solved-pill');
     if (solvedPill) {
       solvedPill.addEventListener('click', () => this.openRatingModal());
+    }
+
+    // Card Vault button & overlay click
+    const btnCards = document.getElementById('btn-cards-gallery');
+    if (btnCards) {
+      btnCards.addEventListener('click', () => this.openCardsGalleryModal());
+    }
+    const cardsOverlay = document.getElementById('cards-gallery-overlay');
+    if (cardsOverlay) {
+      cardsOverlay.addEventListener('click', (e) => {
+        if (e.target === cardsOverlay) this.closeCardsGalleryModal();
+      });
     }
 
     // Command Palette button & overlay click
@@ -856,6 +892,11 @@ class AtCoderFlowApp {
       cfEl.style.color = cfMeta.color;
     }
     if (solvedEl) solvedEl.textContent = `${this.userState.solved_count ?? 0} AC`;
+    const cardsLabel = document.getElementById('btn-cards-label');
+    if (cardsLabel) {
+      const count = flowStore.getCardCollection().length;
+      cardsLabel.textContent = `[i] 🃏 VAULT (${count})`;
+    }
   }
 
   async fetchUserPreferences() {
@@ -874,6 +915,102 @@ class AtCoderFlowApp {
     try {
       flowStore.saveUserPreferences(prefs);
     } catch (_) {}
+  }
+
+  /**
+   * Opens the SFW Anime Artwork Reward Card Vault Modal.
+   */
+  openCardsGalleryModal() {
+    audioEngine.playClick();
+    const overlay = document.getElementById('cards-gallery-overlay');
+    if (!overlay) return;
+    this.renderCardsGalleryContent();
+    overlay.style.display = 'flex';
+  }
+
+  closeCardsGalleryModal() {
+    const overlay = document.getElementById('cards-gallery-overlay');
+    if (overlay) overlay.style.display = 'none';
+  }
+
+  renderCardsGalleryContent() {
+    const container = document.getElementById('cards-gallery-body');
+    if (!container) return;
+
+    const cards = flowStore.getCardCollection();
+    const ssrCount = cards.filter(c => c.rarityTier === 'SSR').length;
+    const srCount = cards.filter(c => c.rarityTier === 'SR').length;
+
+    container.innerHTML = `
+      <div class="shortcuts-modal-header">
+        <div>
+          <strong>🃏 ANIME ARTWORK REWARD VAULT (SFW GACHA COLLECTION)</strong>
+          <span class="shortcuts-sub">Solve problems (or beat Par / hit Frontier Leaps) to unlock higher-rarity SFW character cards (${cards.length} collected · ${ssrCount} SSR · ${srCount} SR)</span>
+        </div>
+        <div style="display:flex; gap:8px; align-items:center;">
+          <button id="btn-roll-gacha-now" class="btn-flow-launch" title="Roll a new SFW Anime Artwork Card right now">🎲 ROLL NEW CARD</button>
+          <button id="btn-close-cards-modal" class="btn-drawer-close">[Esc] CLOSE</button>
+        </div>
+      </div>
+
+      ${cards.length === 0 ? `
+        <div class="cards-empty-state">
+          <p>No reward cards unlocked yet. Every verified or attested <strong>AC Solve</strong> automatically drops a new SFW Anime Artwork Card!</p>
+          <button id="btn-roll-first-card" class="btn-zen-primary" style="margin-top:10px;">🎲 Roll Your First Starter Card</button>
+        </div>
+      ` : `
+        <div class="cards-vault-grid">
+          ${cards.map(c => `
+            <div class="reward-vault-card" style="border-color:${c.rarityColor || '#262936'}66;">
+              <div class="rvc-image-wrap">
+                <img src="${c.imageUrl}" alt="${c.character || 'Anime Card'}" loading="lazy" class="rvc-img" />
+                <span class="rvc-rarity-pill" style="color:${c.rarityColor}; border-color:${c.rarityColor};">${c.rarityTier || 'R'}</span>
+              </div>
+              <div class="rvc-info">
+                <div class="rvc-title" title="${c.character || ''}">${c.character || 'Anime Illustration'}</div>
+                <div class="rvc-meta">Art: ${c.artist || 'Illustrator'} · <span style="color:var(--accent-cyan);">${(c.problemId || 'AC').toUpperCase()} (${c.problemDiff || 1200})</span></div>
+                <div class="rvc-actions">
+                  <a href="${c.fullUrl || c.imageUrl}" target="_blank" rel="noopener" class="btn-copy-sample">FULL ART ↗</a>
+                  <button class="btn-copy-sample btn-del-card" data-id="${c.id}" title="Remove from Vault">✕</button>
+                </div>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      `}
+    `;
+
+    document.getElementById('btn-close-cards-modal')?.addEventListener('click', () => this.closeCardsGalleryModal());
+
+    const rollHandler = async (btn) => {
+      if (!btn) return;
+      btn.disabled = true;
+      btn.textContent = '🎲 ROLLING...';
+      try {
+        const card = await flowStore.rollRewardCard(this.zen?.currentProblem || null, null);
+        audioEngine.playChime();
+        this.updateHudDOM();
+        this.renderCardsGalleryContent();
+        this.showToast(`Unlocked [${card.rarity}] ${card.character}!`, 'ac-toast');
+      } catch (err) {
+        this.showToast(`Roll failed: ${err.message}`, 'error');
+        btn.disabled = false;
+        btn.textContent = '🎲 ROLL NEW CARD';
+      }
+    };
+
+    const btnRoll = document.getElementById('btn-roll-gacha-now');
+    if (btnRoll) btnRoll.addEventListener('click', () => rollHandler(btnRoll));
+    const btnFirst = document.getElementById('btn-roll-first-card');
+    if (btnFirst) btnFirst.addEventListener('click', () => rollHandler(btnFirst));
+
+    container.querySelectorAll('.btn-del-card').forEach(btn => {
+      btn.addEventListener('click', () => {
+        flowStore.deleteRewardCard(btn.dataset.id);
+        this.updateHudDOM();
+        this.renderCardsGalleryContent();
+      });
+    });
   }
 
   /**

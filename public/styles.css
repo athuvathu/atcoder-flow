@@ -4059,3 +4059,158 @@ body.hide-difficulty .zen-problem-title {
   color: var(--text-muted);
 }
 
+/* ============================================================================
+ * SFW ANIME ARTWORK REWARD CARD GACHA & VAULT
+ * ============================================================================ */
+
+.ac-reward-card-slot {
+  margin: 12px 0;
+}
+
+.ac-reward-loading {
+  padding: 10px 12px;
+  background: #0a0c12;
+  border: 1px dashed #262936;
+  border-radius: 4px;
+  font-size: 11px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.ac-reward-card-preview {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: #090b10;
+  border: 1px solid var(--accent-cyan);
+  border-radius: 4px;
+  padding: 8px 12px;
+  text-align: left;
+}
+
+.ac-reward-thumb {
+  width: 56px;
+  height: 76px;
+  object-fit: cover;
+  border-radius: 3px;
+  border: 1px solid #262936;
+  flex-shrink: 0;
+}
+
+.ac-reward-meta {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.ac-reward-rarity {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+
+.ac-reward-title {
+  font-size: 12px;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ac-reward-sub {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.cards-empty-state {
+  padding: 36px 20px;
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 12px;
+  background: #090b10;
+  border: 1px dashed #222530;
+  border-radius: 4px;
+}
+
+.cards-vault-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(195px, 1fr));
+  gap: 14px;
+  max-height: 68vh;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.reward-vault-card {
+  background: #090b10;
+  border: 1px solid #222530;
+  border-radius: 4px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  transition: transform 0.15s ease, border-color 0.15s ease;
+}
+
+.reward-vault-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--accent-cyan) !important;
+}
+
+.rvc-image-wrap {
+  position: relative;
+  width: 100%;
+  height: 230px;
+  background: #06070a;
+  overflow: hidden;
+}
+
+.rvc-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.rvc-rarity-pill {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: rgba(8, 9, 13, 0.88);
+  border: 1px solid var(--accent-cyan);
+  padding: 2px 7px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.rvc-info {
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.rvc-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rvc-meta {
+  font-size: 10px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rvc-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 4px;
+}
