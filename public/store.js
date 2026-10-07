@@ -384,7 +384,7 @@ class FlowStoreClass {
       rarityColor = '#2ecc71';
     }
 
-    const waifuImUrl = 'https://api.waifu.im/images';
+    const waifuImUrl = 'https://api.waifu.im/images?IsNsfw=True';
     const res = await fetch(waifuImUrl, {
       headers: { Accept: 'application/json' },
       cache: 'no-store'
