@@ -1076,10 +1076,6 @@ export class ZenFlowHUD {
           <span>Training Rating: <strong style="color:${atTr.color};">${data.training_rating}</strong> (+${data.rating_delta}) <span style="color:${cfTr.color}; margin-left:4px;">[CF ${cfTr.cfRating} ${cfTr.title}]</span></span>
         </div>
 
-        <div id="ac-reward-card-slot" class="ac-reward-card-slot">
-          <div class="ac-reward-loading">🃏 Rolling SFW Anime Artwork Reward Card...</div>
-        </div>
-
         <div class="jackpot-next-prompt">
           ${nextPromptHtml}
         </div>
@@ -1087,43 +1083,6 @@ export class ZenFlowHUD {
     `;
 
     this.container.appendChild(overlay);
-
-    // Roll Anime Artwork Reward Card asynchronously so we never block AC celebration
-    const probSnapshot = this.currentProblem;
-    flowStore.rollRewardCard(probSnapshot, data).then(card => {
-      this.onSolveAC(); // Refresh HUD card count
-      const slot = overlay.querySelector('#ac-reward-card-slot');
-      if (!slot || !card) return;
-      slot.innerHTML = `
-        <div class="ac-reward-card-preview" style="border-color:${card.rarityColor};">
-          <div class="ac-reward-img-stage" id="ac-reward-img-trigger" title="Click to view Full Window / Fullscreen">
-            <img src="${escapeHtml(card.imageUrl)}" alt="Anime Reward Card" class="ac-reward-thumb" />
-            <span class="ac-reward-zoom-hint">⛶ CLICK FOR FULL WINDOW</span>
-          </div>
-          <div class="ac-reward-footer">
-            <div class="ac-reward-meta">
-              <span class="ac-reward-rarity" style="color:${card.rarityColor};">[ ★ UNLOCKED CARD: ${escapeHtml(card.rarity)} ]</span>
-              <strong class="ac-reward-title">${escapeHtml(card.character)}</strong>
-              <span class="ac-reward-sub">Art by ${escapeHtml(card.artist)} · Saved to [i] Vault (${flowStore.getCardCollection().length} total)</span>
-            </div>
-            <div class="ac-reward-btns">
-              <button type="button" id="btn-ac-card-fullscreen" class="btn-zen-primary" style="font-size:11px; padding:6px 12px;">⛶ FULL WINDOW</button>
-              <a href="${escapeHtml(card.fullUrl)}" target="_blank" rel="noopener" class="btn-action-ghost" style="font-size:11px; padding:6px 10px;">RAW ↗</a>
-            </div>
-          </div>
-        </div>
-      `;
-      const openFull = () => {
-        if (window.__atcoderApp && typeof window.__atcoderApp.openCardLightbox === 'function') {
-          window.__atcoderApp.openCardLightbox(card);
-        }
-      };
-      slot.querySelector('#ac-reward-img-trigger')?.addEventListener('click', openFull);
-      slot.querySelector('#btn-ac-card-fullscreen')?.addEventListener('click', openFull);
-    }).catch(() => {
-      const slot = overlay.querySelector('#ac-reward-card-slot');
-      if (slot) slot.innerHTML = '';
-    });
 
     // Odometer number roll-up animation
     this.animateOdometer(overlay.querySelector('#odometer-val'), data.solve_performance - 150, data.solve_performance);
