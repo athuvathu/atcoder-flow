@@ -191,8 +191,9 @@ export class ZenFlowHUD {
 
     const targetTitle = this.currentProblem.title || this.currentProblem.id;
     const targetDiff = this.currentProblem.clipped_difficulty || 1200;
+    const probCf = atcoderToCodeforces(targetDiff);
 
-    const dummyContests = ['ABC180', 'ARC112', 'ABC240', 'ARC140', 'ABC320', 'ABC360', 'AGC045'];
+    const dummyContests = ['ABC180', 'ABC210', 'ABC240', 'ABC280', 'ABC320', 'ABC360', 'ABC390'];
     let ticks = 0;
     const maxTicks = 8;
 
@@ -204,14 +205,14 @@ export class ZenFlowHUD {
       const randomDiff = Math.floor(800 + Math.random() * 800);
 
       titleEl.textContent = `[ ${randomContest} // Problem Spinning... ]`;
-      diffEl.textContent = `DIFF: ${randomDiff}`;
+      diffEl.textContent = `AT DIFF: ${randomDiff}`;
       diffEl.style.color = '#7d8590';
 
       if (ticks >= maxTicks) {
         clearInterval(reelInterval);
         audioEngine.playClick();
         titleEl.textContent = targetTitle;
-        diffEl.textContent = `DIFF: ${targetDiff}`;
+        diffEl.textContent = `AT DIFF: ${targetDiff} [≈ CF ${probCf.cfRating} ${probCf.title}]`;
         diffEl.style.color = 'var(--accent-cyan)';
         this.startTimer();
       }
@@ -1644,7 +1645,7 @@ export class ZenFlowHUD {
               <strong id="zen-slot-title" class="task-title">${escapeHtml(prob.title || prob.id)}</strong>
             </div>
             <div class="task-meta-pills">
-              <span id="zen-slot-diff" class="diff-badge">DIFF: ${prob.clipped_difficulty || 'N/A'}</span>
+              <span id="zen-slot-diff" class="diff-badge">AT DIFF: ${prob.clipped_difficulty || 'N/A'} [≈ CF ${atcoderToCodeforces(prob.clipped_difficulty || 1200).cfRating} ${atcoderToCodeforces(prob.clipped_difficulty || 1200).title}]</span>
               <span id="zen-active-contest-pill" class="contest-badge-pill">${contestFilter.toUpperCase()}</span>
               ${diffOffset !== 0 ? `<span id="zen-active-bump-pill" class="diff-bump-pill ${diffOffset > 0 ? 'bump-pos' : 'bump-neg'}">${diffOffset > 0 ? '+' : ''}${diffOffset} BUMP</span>` : `<span id="zen-active-bump-pill" class="diff-bump-pill" style="display:none;"></span>`}
               <span id="zen-topic-tag" class="topic-badge" style="cursor:pointer;" title="Click or press [t] to reveal topic">TOPIC: [HIDDEN // 't']</span>

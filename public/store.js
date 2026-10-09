@@ -322,12 +322,12 @@ class FlowStoreClass {
       this.userState.preferences = { muted: false, mode: 'flow', gauntlet_preset: 'escalation', waifu_mode: false };
     }
 
-    // Clear sticky session-only filters (diff_offset, domain_filter, contest_filter) on fresh boot
-    // so old bumps or narrow topic drills never silently skew problem selection.
+    // Clear sticky session-only filters (diff_offset, domain_filter) on fresh boot
+    // and default contest_filter to 'abc' so ARC/AGC ad-hoc traps aren't mixed in by default.
     this.userState.preferences.diff_offset = 0;
     this.userState.preferences.domain_filter = null;
-    if (this.userState.preferences.contest_filter === 'agc') {
-      this.userState.preferences.contest_filter = 'all';
+    if (!this.userState.preferences.contest_filter || this.userState.preferences.contest_filter === 'agc' || this.userState.preferences.contest_filter === 'all') {
+      this.userState.preferences.contest_filter = 'abc';
     }
 
     // One-time repair if training_rating was inflated by old Fast Frontier Leap or corrupted
@@ -619,13 +619,13 @@ class FlowStoreClass {
   }
 
   getContestFilter() {
-    return (this.userState.preferences?.contest_filter || 'all').toLowerCase();
+    return (this.userState.preferences?.contest_filter || 'abc').toLowerCase();
   }
 
-  setContestFilter(type = 'all') {
+  setContestFilter(type = 'abc') {
     const valid = ['all', 'abc', 'arc', 'agc'].includes((type || '').toLowerCase())
       ? type.toLowerCase()
-      : 'all';
+      : 'abc';
     this.saveUserPreferences({ contest_filter: valid });
     return valid;
   }
@@ -899,7 +899,7 @@ class FlowStoreClass {
 
     const matchesContest = (contestId) => {
       const c = (contestId || '').toLowerCase();
-      if (contestFilter === 'abc') return c.startsWith('abc') && isGoldenEra(c);
+      if (contestFilter === 'abc') return (c.startsWith('abc') || c === 'dp') && isGoldenEra(c);
       if (contestFilter === 'arc') return c.startsWith('arc') && isGoldenEra(c);
       if (contestFilter === 'agc') return c.startsWith('agc');
       return isGoldenEra(c);
