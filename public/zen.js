@@ -708,12 +708,11 @@ export class ZenFlowHUD {
    * Sets practice intensity mode and fetches next problem in that bracket.
    */
   async setPracticeMode(mode) {
-    if (this.activeMode === mode) return;
     this.activeMode = mode;
     audioEngine.playClick();
-    this.showToast(`Switched mode to ${mode.toUpperCase()}. Fetching next problem...`, 'info');
+    this.showToast(`Pulling ${mode.toUpperCase()} problem...`, 'info');
     try {
-      const prob = flowStore.getNextFlowProblem(mode);
+      const prob = flowStore.getNextFlowProblem(mode, { excludeId: this.currentProblem?.id });
       if (prob && prob.id) {
         this.loadProblem(prob);
       }
@@ -849,7 +848,7 @@ export class ZenFlowHUD {
       if (existingBar) existingBar.remove();
 
       // ===== JACKPOT: Verified or Attested AC =====
-      const data = flowStore.recordSolve(this.currentProblem.id, this.elapsedSeconds, optimistic);
+      const data = flowStore.recordSolve(this.currentProblem.id, this.elapsedSeconds, optimistic, this.activeMode || 'flow');
 
       this.sessionSolves++;
       this.trainingRating = data.training_rating;
@@ -1007,6 +1006,7 @@ export class ZenFlowHUD {
     const cfPerf = atcoderToCodeforces(data.solve_performance);
     const cfTr = atcoderToCodeforces(data.training_rating);
     const atTr = getAtcoderMeta(data.training_rating);
+    const waifuEnabled = flowStore.isWaifuModeEnabled();
 
     const surgeBannerHtml = data.is_critical 
       ? `<div class="surge-badge critical">[ CRITICAL SPEED SURGE: +${data.speed_surge_bonus} BONUS ]</div>`
@@ -1016,10 +1016,6 @@ export class ZenFlowHUD {
 
     const redemptionBannerHtml = data.was_redemption
       ? `<div class="surge-badge critical">[ ★ UP-SOLVED REDEMPTION // GRADUATED FROM REVIEW QUEUE (+50% XP) ]</div>`
-      : '';
-
-    const frontierBannerHtml = data.is_frontier_leap
-      ? `<div class="surge-badge clutch">[ ⚡ FRONTIER RATING LEAP: +${data.rating_delta} TR JUMP ]</div>`
       : '';
 
     const gauntletBannerHtml = isGauntlet
@@ -1045,7 +1041,6 @@ export class ZenFlowHUD {
       <div class="jackpot-card">
         <div class="jackpot-verdict">[ ACCEPTED ]</div>
         ${redemptionBannerHtml}
-        ${frontierBannerHtml}
         ${surgeBannerHtml}
         ${gauntletBannerHtml}
         <div class="jackpot-task">${this.currentProblem.title || this.currentProblem.id}</div>
@@ -1076,6 +1071,12 @@ export class ZenFlowHUD {
           <span>Training Rating: <strong style="color:${atTr.color};">${data.training_rating}</strong> (+${data.rating_delta}) <span style="color:${cfTr.color}; margin-left:4px;">[CF ${cfTr.cfRating} ${cfTr.title}]</span></span>
         </div>
 
+        ${waifuEnabled ? `
+          <div id="ac-reward-card-slot" class="ac-reward-card-slot">
+            <div class="ac-reward-loading">🃏 Rolling Waifu.im Artwork Reward Card...</div>
+          </div>
+        ` : ''}
+
         <div class="jackpot-next-prompt">
           ${nextPromptHtml}
         </div>
@@ -1083,6 +1084,44 @@ export class ZenFlowHUD {
     `;
 
     this.container.appendChild(overlay);
+
+    if (waifuEnabled) {
+      const probSnapshot = this.currentProblem;
+      flowStore.rollRewardCard(probSnapshot, data).then(card => {
+        this.onSolveAC(); // Refresh HUD card count
+        const slot = overlay.querySelector('#ac-reward-card-slot');
+        if (!slot || !card) return;
+        slot.innerHTML = `
+          <div class="ac-reward-card-preview" style="border-color:${card.rarityColor};">
+            <div class="ac-reward-img-stage" id="ac-reward-img-trigger" title="Click to view Full Window / Fullscreen">
+              <img src="${escapeHtml(card.imageUrl)}" alt="Anime Reward Card" class="ac-reward-thumb" />
+              <span class="ac-reward-zoom-hint">⛶ CLICK FOR FULL WINDOW</span>
+            </div>
+            <div class="ac-reward-footer">
+              <div class="ac-reward-meta">
+                <span class="ac-reward-rarity" style="color:${card.rarityColor};">[ ★ UNLOCKED CARD: ${escapeHtml(card.rarity)} ]</span>
+                <strong class="ac-reward-title">${escapeHtml(card.character)}</strong>
+                <span class="ac-reward-sub">Art by ${escapeHtml(card.artist)} · Saved to [i] Vault (${flowStore.getCardCollection().length} total)</span>
+              </div>
+              <div class="ac-reward-btns">
+                <button type="button" id="btn-ac-card-fullscreen" class="btn-zen-primary" style="font-size:11px; padding:6px 12px;">⛶ FULL WINDOW</button>
+                <a href="${escapeHtml(card.fullUrl)}" target="_blank" rel="noopener" class="btn-action-ghost" style="font-size:11px; padding:6px 10px;">RAW ↗</a>
+              </div>
+            </div>
+          </div>
+        `;
+        const openFull = () => {
+          if (window.__atcoderApp && typeof window.__atcoderApp.openCardLightbox === 'function') {
+            window.__atcoderApp.openCardLightbox(card);
+          }
+        };
+        slot.querySelector('#ac-reward-img-trigger')?.addEventListener('click', openFull);
+        slot.querySelector('#btn-ac-card-fullscreen')?.addEventListener('click', openFull);
+      }).catch(() => {
+        const slot = overlay.querySelector('#ac-reward-card-slot');
+        if (slot) slot.innerHTML = '';
+      });
+    }
 
     // Odometer number roll-up animation
     this.animateOdometer(overlay.querySelector('#odometer-val'), data.solve_performance - 150, data.solve_performance);
@@ -1299,16 +1338,19 @@ export class ZenFlowHUD {
   }
 
   /**
-   * Skips problem with difficulty recalibration.
+   * Skips problem and pulls a fresh unseen problem in the current mode.
    */
   async handleSkip(reason = 'neutral') {
     audioEngine.playClick();
     try {
-      const data = flowStore.recordSkip(this.currentProblem.id, reason);
+      const mode = this.activeMode || 'flow';
+      const data = flowStore.recordSkip(this.currentProblem?.id, reason, mode);
       localStorage.removeItem('atcoder_flow_zen_state');
 
       if (data.primed_problem) {
-        this.showToast(`Problem skipped. Difficulty adjusted (${data.delta > 0 ? '+' : ''}${data.delta}). Loading next...`, 'info');
+        const diffStr = data.primed_problem.clipped_difficulty || 1200;
+        const deltaStr = data.delta !== 0 ? ` (${data.delta > 0 ? '+' : ''}${data.delta} TR)` : '';
+        this.showToast(`Skipped -> Next ${mode.toUpperCase()} problem (Diff: ${diffStr})${deltaStr}`, 'info');
         this.loadProblem(data.primed_problem);
       } else {
         this.destroy();
@@ -1365,7 +1407,7 @@ export class ZenFlowHUD {
         <div class="giveup-impact-box">
           <div class="giveup-impact-row">
             <span>RATING ADJUSTMENT:</span>
-            <strong class="delta-neg">-20 TR</strong>
+            <strong class="delta-neg">-15 TR</strong>
           </div>
           <div class="giveup-impact-row">
             <span>SESSION STREAK:</span>
@@ -1443,7 +1485,7 @@ export class ZenFlowHUD {
     const isGauntlet = Boolean(this.gauntletState && this.gauntletState.active);
 
     try {
-      const data = flowStore.recordGiveUp(this.currentProblem?.id, this.elapsedSeconds);
+      const data = flowStore.recordGiveUp(this.currentProblem?.id, this.elapsedSeconds, this.activeMode || 'flow');
       localStorage.removeItem('atcoder_flow_zen_state');
 
       this.trainingRating = data.new_tr;
@@ -1462,7 +1504,7 @@ export class ZenFlowHUD {
         return;
       }
 
-      this.showToast(`Gave up on problem. TR: ${data.new_tr} (-20). Loading next challenge...`, 'info');
+      this.showToast(`Gave up on problem. TR: ${data.new_tr} (-15). Loading next challenge...`, 'info');
 
       if (data.primed_problem) {
         this.loadProblem(data.primed_problem);

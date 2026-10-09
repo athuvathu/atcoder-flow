@@ -243,6 +243,9 @@ class FlowStoreClass {
     this.isLoaded = false;
     this.loadPromise = null;
 
+    this.sessionSeenIds = new Set();
+    this.lastServedContestId = null;
+
     // Default User State
     this.userState = {
       handle: 'atrv',
@@ -257,9 +260,11 @@ class FlowStoreClass {
       solved_count: 0,
       last_solve_epoch: 0,
       solved_ids: [],
+      skipped_ids: [],
       review_list: [],
       solve_log: [],
-      preferences: { muted: false, mode: 'flow', gauntlet_preset: 'escalation' }
+      card_collection: [],
+      preferences: { muted: false, mode: 'flow', gauntlet_preset: 'escalation', waifu_mode: false }
     };
   }
 
@@ -311,6 +316,33 @@ class FlowStoreClass {
 
     if (!Array.isArray(this.userState.review_list)) this.userState.review_list = [];
     if (!Array.isArray(this.userState.solve_log)) this.userState.solve_log = [];
+    if (!Array.isArray(this.userState.card_collection)) this.userState.card_collection = [];
+    if (!Array.isArray(this.userState.skipped_ids)) this.userState.skipped_ids = [];
+    if (!this.userState.preferences || typeof this.userState.preferences !== 'object') {
+      this.userState.preferences = { muted: false, mode: 'flow', gauntlet_preset: 'escalation', waifu_mode: false };
+    }
+
+    // Clear sticky session-only filters (diff_offset, domain_filter, contest_filter) on fresh boot
+    // so old bumps or narrow topic drills never silently skew problem selection.
+    this.userState.preferences.diff_offset = 0;
+    this.userState.preferences.domain_filter = null;
+    if (this.userState.preferences.contest_filter === 'agc') {
+      this.userState.preferences.contest_filter = 'all';
+    }
+
+    // One-time repair if training_rating was inflated by old Fast Frontier Leap or corrupted
+    if (!this.userState.preferences.rating_sanitized_v2) {
+      const hadLeap = this.userState.solve_log.some(e => e && e.is_frontier_leap);
+      const tr = Number(this.userState.training_rating);
+      if (!Number.isFinite(tr) || tr < 400 || tr > 3200 || hadLeap) {
+        // Restore to last explicit manual_set rating if present, else 1200
+        const lastManual = [...this.userState.solve_log].reverse().find(e => e && e.status === 'manual_tr');
+        this.userState.training_rating = lastManual && Number.isFinite(lastManual.tr_after) ? lastManual.tr_after : 1200;
+      }
+      this.userState.preferences.rating_sanitized_v2 = true;
+      this.saveToLocalStorage();
+    }
+
     this.solvedSet = new Set(this.userState.solved_ids || []);
     this.userState.solved_count = this.solvedSet.size;
   }
@@ -327,8 +359,124 @@ class FlowStoreClass {
     return {
       ...this.userState,
       solved_count: this.solvedSet.size,
-      review_count: (this.userState.review_list || []).length
+      review_count: (this.userState.review_list || []).length,
+      card_count: (this.userState.card_collection || []).length,
+      waifu_mode: this.isWaifuModeEnabled()
     };
+  }
+
+  isWaifuModeEnabled() {
+    return Boolean(this.userState.preferences?.waifu_mode);
+  }
+
+  setWaifuMode(enabled) {
+    this.saveUserPreferences({ waifu_mode: Boolean(enabled) });
+    return this.isWaifuModeEnabled();
+  }
+
+  toggleWaifuMode() {
+    return this.setWaifuMode(!this.isWaifuModeEnabled());
+  }
+
+  /**
+   * Returns all unlocked SFW Anime Artwork Reward Cards.
+   */
+  getCardCollection() {
+    if (!Array.isArray(this.userState.card_collection)) this.userState.card_collection = [];
+    return this.userState.card_collection;
+  }
+
+  /**
+   * Deletes a card from the collection by ID.
+   */
+  deleteRewardCard(cardId) {
+    if (!Array.isArray(this.userState.card_collection)) return;
+    this.userState.card_collection = this.userState.card_collection.filter(c => c.id !== cardId);
+    this.saveToLocalStorage();
+  }
+
+  /**
+   * Clears all cards from the collection.
+   */
+  clearRewardCards() {
+    this.userState.card_collection = [];
+    this.saveToLocalStorage();
+  }
+
+  /**
+   * Rolls a new Anime Character Artwork Card directly from Waifu.im v7 API (`https://api.waifu.im/images`)
+   * and saves it to `card_collection`.
+   */
+  async rollRewardCard(problem = null, solveRes = null) {
+    const rawDiff = problem?.clipped_difficulty ?? problem?.difficulty ?? this.userState.training_rating ?? 1200;
+    const diff = Math.max(100, Math.round(rawDiff));
+    let rarity = 'N // INITIATE';
+    let rarityTier = 'N';
+    let rarityColor = '#94a3b8';
+
+    if (diff >= 2000 || solveRes?.is_frontier_leap) {
+      rarity = 'SSR // MYTHIC';
+      rarityTier = 'SSR';
+      rarityColor = '#f1c40f';
+    } else if (diff >= 1600 || solveRes?.beat_par) {
+      rarity = 'SR // ELITE';
+      rarityTier = 'SR';
+      rarityColor = '#00e5ff';
+    } else if (diff >= 1200) {
+      rarity = 'R // VANGUARD';
+      rarityTier = 'R';
+      rarityColor = '#2ecc71';
+    }
+
+    const waifuImUrl = 'https://api.waifu.im/images?IsNsfw=True';
+    const res = await fetch(waifuImUrl, {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store'
+    });
+    if (!res.ok) {
+      throw new Error(`Waifu.im API HTTP ${res.status}`);
+    }
+
+    const d = await res.json();
+    const img = Array.isArray(d?.items) ? d.items[0] : (Array.isArray(d?.images) ? d.images[0] : null);
+    if (!img || !img.url) {
+      throw new Error('Waifu.im returned empty items');
+    }
+
+    const tagNames = Array.isArray(img.tags)
+      ? img.tags.map(t => t.name || t.slug).filter(Boolean)
+      : ['Waifu'];
+    const artistName = (Array.isArray(img.artists) && img.artists[0]?.name)
+      || img?.artist?.name
+      || 'Waifu.im Artist';
+
+    const cardData = {
+      id: `card_${img.id || img.image_id || Date.now()}_${Math.floor(Math.random() * 1000)}`,
+      imageUrl: img.url,
+      fullUrl: img.url,
+      rarity,
+      rarityTier,
+      rarityColor,
+      category: tagNames[0] || 'Waifu',
+      tags: tagNames.slice(0, 5),
+      character: tagNames.join(' · ') || 'Waifu Illustration',
+      artist: artistName,
+      sourceUrl: img.source || img.url,
+      problemId: problem?.id || 'bonus_roll',
+      problemTitle: problem?.title || 'XP Gacha Roll',
+      problemDiff: diff,
+      unlockedAt: new Date().toISOString()
+    };
+
+    if (!Array.isArray(this.userState.card_collection)) {
+      this.userState.card_collection = [];
+    }
+    this.userState.card_collection.unshift(cardData);
+    if (this.userState.card_collection.length > 200) {
+      this.userState.card_collection = this.userState.card_collection.slice(0, 200);
+    }
+    this.saveToLocalStorage();
+    return cardData;
   }
 
   setHandle(newHandle) {
@@ -672,67 +820,71 @@ class FlowStoreClass {
 
   /**
    * Only-Bangers Golden Era Problem Selection Engine (ABC 150+, ARC 100+, DP).
-   * Supports manual difficulty bump offset, contest filter (ALL, ABC, ARC, AGC), and domain drill.
+   * Strictly enforces difficulty bounds, excludes skipped/recently-seen problems,
+   * and samples across a diverse pool so skipping never cycles between the same questions.
    */
   getNextFlowProblem(mode = 'flow', options = {}) {
-    const rawTr = this.userState.training_rating || 1200;
-    const diffOffset = (options.diffOffset !== undefined) ? options.diffOffset : this.getDiffOffset();
-    const contestFilter = (options.contestFilter !== undefined) ? options.contestFilter.toLowerCase() : this.getContestFilter();
+    const rawTr = Number(this.userState.training_rating) || 1200;
+    const diffOffset = (options.diffOffset !== undefined) ? Number(options.diffOffset) : this.getDiffOffset();
+    const contestFilter = (options.contestFilter !== undefined) ? String(options.contestFilter).toLowerCase() : this.getContestFilter();
     const domainFilter = (options.domainFilter !== undefined) ? options.domainFilter : this.getDomainFilter();
     const excludeId = options.excludeId || null;
 
-    // Special mode: 'review' pulls directly from the user's Spaced Repetition Review Queue (review_list)
+    if (excludeId) {
+      this.sessionSeenIds.add(excludeId);
+    }
+
+    const skippedSet = new Set([
+      ...(Array.isArray(this.userState.skipped_ids) ? this.userState.skipped_ids : []),
+      ...this.sessionSeenIds
+    ]);
+    if (excludeId) skippedSet.add(excludeId);
+
+    // Special mode: 'review' pulls from Spaced Repetition Review Queue (cycling through unvisited items)
     if (mode === 'review') {
-      const reviewIds = (this.userState.review_list || []).filter(id => id !== excludeId);
-      if (reviewIds.length > 0) {
-        const chosenId = reviewIds[0];
+      const allRev = (this.userState.review_list || []).filter(id => id !== excludeId);
+      const unvisitedRev = allRev.filter(id => !this.sessionSeenIds.has(id));
+      const poolRev = unvisitedRev.length > 0 ? unvisitedRev : allRev;
+      if (poolRev.length > 0) {
+        const chosenId = poolRev[0];
+        this.sessionSeenIds.add(chosenId);
         const prob = this.getProblem(chosenId);
         if (prob) return { ...prob, in_review: true };
       }
     }
 
-    const tr = Math.max(400, rawTr + diffOffset);
+    const tr = Math.max(200, Math.min(3400, rawTr + diffOffset));
 
     let minDiff, maxDiff;
     switch (mode) {
       case 'warmup':
-        minDiff = tr - 250;
-        maxDiff = tr - 50;
+        minDiff = Math.max(100, tr - 250);
+        maxDiff = Math.max(250, tr - 50);
         break;
       case 'speed':
-        minDiff = tr - 200;
-        maxDiff = tr - 50;
+        minDiff = Math.max(100, tr - 200);
+        maxDiff = Math.max(250, tr - 40);
         break;
       case 'reach':
-        minDiff = tr + 100;
-        maxDiff = tr + 250;
+        minDiff = tr + 80;
+        maxDiff = tr + 240;
         break;
       case 'boss':
-        minDiff = tr + 120;
-        maxDiff = tr + 350;
+        minDiff = tr + 140;
+        maxDiff = tr + 340;
         break;
       case 'flow':
       default:
-        minDiff = tr - 50;
-        maxDiff = tr + 120;
+        minDiff = Math.max(100, tr - 80);
+        maxDiff = tr + 100;
         break;
     }
 
-    // Matcher for contest type and Golden Era standards
-    const matchesContest = (contestId) => {
+    // Target difficulty centered cleanly inside the requested mode's bracket (fixes old 2*tr double-add bug!)
+    const targetDiff = mode === 'flow' ? tr : Math.round((minDiff + maxDiff) / 2);
+
+    const isGoldenEra = (contestId) => {
       const c = (contestId || '').toLowerCase();
-      if (contestFilter === 'abc') {
-        const num = parseInt(c.slice(3), 10);
-        return c.startsWith('abc') && !isNaN(num) && num >= 150;
-      }
-      if (contestFilter === 'arc') {
-        const num = parseInt(c.slice(3), 10);
-        return c.startsWith('arc') && !isNaN(num) && num >= 100;
-      }
-      if (contestFilter === 'agc') {
-        return c.startsWith('agc');
-      }
-      // 'all' includes modern ABC, modern ARC, AGC, and Educational DP
       if (c === 'dp' || c.startsWith('agc')) return true;
       if (c.startsWith('abc')) {
         const num = parseInt(c.slice(3), 10);
@@ -745,77 +897,114 @@ class FlowStoreClass {
       return false;
     };
 
+    const matchesContest = (contestId) => {
+      const c = (contestId || '').toLowerCase();
+      if (contestFilter === 'abc') return c.startsWith('abc') && isGoldenEra(c);
+      if (contestFilter === 'arc') return c.startsWith('arc') && isGoldenEra(c);
+      if (contestFilter === 'agc') return c.startsWith('agc');
+      return isGoldenEra(c);
+    };
+
     const matchesDomain = (prob) => {
       if (!domainFilter || domainFilter === 'ALL') return true;
       return classifyProblemDomain(prob) === domainFilter;
     };
 
-    // Filter to Golden Era candidates matching bounds, contest, and domain
+    // Pass 1: Exact difficulty bracket + requested contest & domain + unseen/unskipped
     let candidates = this.problems.filter(p => {
-      if (this.isSolved(p.id)) return false;
-      if (excludeId && p.id === excludeId) return false;
-
-      const diff = p.clipped_difficulty || 1200;
-      if (diff < minDiff || diff > maxDiff) return false;
-
+      if (this.isSolved(p.id) || skippedSet.has(p.id)) return false;
+      const diff = Number(p.clipped_difficulty);
+      if (!Number.isFinite(diff) || diff < minDiff || diff > maxDiff) return false;
       return matchesContest(p.contest_id) && matchesDomain(p);
     });
 
-    // Graceful fallback 1: Expand difficulty bounds by +/- 150 within requested contest & domain
+    // Pass 2: Slightly wider difficulty bracket (+/- 100) + requested contest & domain + unseen/unskipped
     if (candidates.length === 0) {
       candidates = this.problems.filter(p => {
-        if (this.isSolved(p.id)) return false;
-        if (excludeId && p.id === excludeId) return false;
-        const diff = p.clipped_difficulty || 1200;
-        if (diff < minDiff - 150 || diff > maxDiff + 150) return false;
+        if (this.isSolved(p.id) || skippedSet.has(p.id)) return false;
+        const diff = Number(p.clipped_difficulty);
+        if (!Number.isFinite(diff) || diff < minDiff - 100 || diff > maxDiff + 100) return false;
         return matchesContest(p.contest_id) && matchesDomain(p);
       });
     }
 
-    // Graceful fallback 2: Any unsolved problem in requested contest & domain
+    // Pass 3: Strictly preserve difficulty bracket [minDiff - 100, maxDiff + 100] across ALL Golden Era contests/domains
+    // (NEVER drop difficulty bounds to serve random 2500+ monsters when a narrow filter has no problems at your level!)
     if (candidates.length === 0) {
       candidates = this.problems.filter(p => {
-        if (this.isSolved(p.id)) return false;
-        if (excludeId && p.id === excludeId) return false;
-        return matchesContest(p.contest_id) && matchesDomain(p);
+        if (this.isSolved(p.id) || skippedSet.has(p.id)) return false;
+        const diff = Number(p.clipped_difficulty);
+        if (!Number.isFinite(diff) || diff < minDiff - 100 || diff > maxDiff + 100) return false;
+        return isGoldenEra(p.contest_id);
       });
     }
 
-    // Graceful fallback 3: Any unsolved problem in domain across all contests
-    if (candidates.length === 0 && domainFilter && domainFilter !== 'ALL') {
+    // Pass 4: If user skipped every single unseen problem in this difficulty bracket, reset skipped history for this bracket
+    // while STILL enforcing the difficulty bracket!
+    if (candidates.length === 0) {
+      this.sessionSeenIds.clear();
+      this.userState.skipped_ids = [];
+      if (excludeId) this.sessionSeenIds.add(excludeId);
       candidates = this.problems.filter(p => {
         if (this.isSolved(p.id)) return false;
         if (excludeId && p.id === excludeId) return false;
-        return matchesDomain(p);
+        const diff = Number(p.clipped_difficulty);
+        if (!Number.isFinite(diff) || diff < minDiff - 150 || diff > maxDiff + 150) return false;
+        return isGoldenEra(p.contest_id);
       });
     }
 
-    // Ultimate fallback if entire requested contest/domain is exhausted
+    // Pass 5: Final safety net sorted strictly by proximity to targetDiff
     if (candidates.length === 0) {
-      const fallback = this.problems.filter(p => !this.isSolved(p.id) && (!excludeId || p.id !== excludeId));
-      if (fallback.length === 0) return this.problems[0];
-      return fallback[Math.floor(Math.random() * Math.min(10, fallback.length))];
+      candidates = this.problems
+        .filter(p => !this.isSolved(p.id) && (!excludeId || p.id !== excludeId) && Number.isFinite(p.clipped_difficulty))
+        .sort((a, b) => Math.abs(a.clipped_difficulty - targetDiff) - Math.abs(b.clipped_difficulty - targetDiff))
+        .slice(0, 25);
+      if (candidates.length === 0) return this.problems[0];
     }
 
-    // Kotler 4% challenge sweet-spot proximity sorting
-    const targetDiff = tr + (mode === 'flow' ? Math.round(tr * 0.04) : (minDiff + maxDiff) / 2);
-    candidates.sort((a, b) => {
+    // Avoid back-to-back problems from the exact same contest
+    const diffContestPool = this.lastServedContestId
+      ? candidates.filter(p => p.contest_id !== this.lastServedContestId)
+      : candidates;
+    const pool = diffContestPool.length > 0 ? diffContestPool : candidates;
+
+    // Sort by closeness to targetDiff, then sample uniformly from a wide pool (up to 30 candidates)
+    // so skipping ALWAYS gives fresh variety within your exact difficulty bracket.
+    pool.sort((a, b) => {
       const distA = Math.abs((a.clipped_difficulty || 1200) - targetDiff);
       const distB = Math.abs((b.clipped_difficulty || 1200) - targetDiff);
       return distA - distB;
     });
 
-    // Random choice among top 5 nearest candidates for variety
-    const poolSize = Math.min(5, candidates.length);
-    const chosen = candidates[Math.floor(Math.random() * poolSize)];
+    const sampleSize = Math.min(30, pool.length);
+    const chosen = pool[Math.floor(Math.random() * sampleSize)];
+
+    this.sessionSeenIds.add(chosen.id);
+    this.lastServedContestId = chosen.contest_id;
+    this._recordSkippedHistory(chosen.id);
+
     return { ...chosen, is_solved: false };
   }
 
+  _recordSkippedHistory(problemId) {
+    if (!problemId) return;
+    if (!Array.isArray(this.userState.skipped_ids)) {
+      this.userState.skipped_ids = [];
+    }
+    this.userState.skipped_ids = this.userState.skipped_ids.filter(id => id !== problemId);
+    this.userState.skipped_ids.push(problemId);
+    if (this.userState.skipped_ids.length > 80) {
+      this.userState.skipped_ids = this.userState.skipped_ids.slice(-80);
+    }
+    this.saveToLocalStorage();
+  }
+
   /**
-   * Records AC solve, computes Par pacing bonuses, Fast Frontier Rating Leap for above-TR solves,
+   * Records AC solve, computes Par pacing bonuses, steady Elo rating progression,
    * Up-Solve Redemption graduation from review_list, and solve_log telemetry.
    */
-  recordSolve(problemId, elapsedSeconds, isAttested = true) {
+  recordSolve(problemId, elapsedSeconds, isAttested = true, activeMode = 'flow') {
     const problem = this.getProblem(problemId) || { id: problemId, clipped_difficulty: 1200 };
     const baseDiff = problem.clipped_difficulty || 1200;
 
@@ -840,7 +1029,7 @@ class FlowStoreClass {
     const solvePerformance = Math.max(400, Math.round(baseDiff + speedBonus + speedSurgeBonus));
     const cfPerf = atcoderToCodeforces(solvePerformance);
 
-    // Elo-principled Training Rating progression + Fast Frontier Leap when solving above-TR problems
+    // Steady Elo-principled Training Rating progression (no runaway +350 spikes on Attest AC)
     const currentTr = this.userState.training_rating || 1200;
     const expectedScore = 1 / (1 + Math.pow(10, (currentTr - baseDiff) / 400));
     const baseDelta = Math.max(1, Math.round(16 * (1 - expectedScore)));
@@ -856,18 +1045,8 @@ class FlowStoreClass {
       speedDeltaBonus = -1;
     }
 
-    let ratingDelta = Math.max(1, Math.min(22, baseDelta + speedDeltaBonus));
-    let isFrontierLeap = false;
-
-    // Fast Frontier Leap: if problem difficulty is >100 above current TR, leap 35% of the gap
-    // so capable users never have to grind dozens of easy problems to reach their true rating.
-    if (baseDiff > currentTr + 100) {
-      const frontierLeap = Math.round((baseDiff - currentTr) * 0.35) + Math.max(0, speedDeltaBonus);
-      if (frontierLeap > ratingDelta) {
-        ratingDelta = Math.min(350, frontierLeap);
-        isFrontierLeap = true;
-      }
-    }
+    const ratingDelta = Math.max(1, Math.min(24, baseDelta + speedDeltaBonus));
+    const isFrontierLeap = false;
 
     // Check if this solve graduates a problem from the Spaced Repetition Review Queue
     let wasRedemption = false;
@@ -880,7 +1059,7 @@ class FlowStoreClass {
     }
 
     // Update state
-    this.userState.training_rating = Math.round(this.userState.training_rating + ratingDelta);
+    this.userState.training_rating = Math.max(100, Math.min(3600, Math.round(currentTr + ratingDelta)));
     this.userState.streak = (this.userState.streak || 0) + 1;
     this.userState.multiplier = Math.min(4, 1 + Math.floor(this.userState.streak / 5) * 0.25);
     const xpGained = Math.round((baseDiff / 10) * this.userState.multiplier * (wasRedemption ? 1.5 : 1));
@@ -905,13 +1084,14 @@ class FlowStoreClass {
       delta: ratingDelta,
       status: 'ac',
       was_redemption: wasRedemption,
-      is_frontier_leap: isFrontierLeap
+      is_frontier_leap: false
     });
     if (this.userState.solve_log.length > 100) {
       this.userState.solve_log = this.userState.solve_log.slice(-100);
     }
 
     this.solvedSet.add(problemId);
+    this.sessionSeenIds.add(problemId);
     this.saveToLocalStorage();
 
     const cfTr = atcoderToCodeforces(this.userState.training_rating);
@@ -939,24 +1119,30 @@ class FlowStoreClass {
       multiplier: this.userState.multiplier,
       xp_gained: xpGained,
       is_optimistic: Boolean(isAttested),
-      primed_problem: this.getNextFlowProblem('flow')
+      primed_problem: this.getNextFlowProblem(activeMode || 'flow', { excludeId: problemId })
     };
   }
 
   /**
-   * Records a skip / abandon with user feedback and re-primes next problem.
+   * Records a skip / abandon, adds problemId to skipped history so it never repeats in a loop,
+   * and primes the next problem in the active mode.
    */
-  recordSkip(problemId, reason = 'neutral') {
+  recordSkip(problemId, reason = 'neutral', activeMode = 'flow') {
     const currentTr = this.userState.training_rating || 1200;
-    let delta = -10;
-    if (reason === 'too_hard') delta = -25;
-    else if (reason === 'too_easy') delta = +25;
+    let delta = 0;
+    if (reason === 'too_hard') delta = -20;
+    else if (reason === 'too_easy') delta = +20;
 
-    const newTr = Math.max(400, Math.min(3200, currentTr + delta));
+    const newTr = Math.max(100, Math.min(3600, currentTr + delta));
     this.userState.training_rating = newTr;
-    this.saveToLocalStorage();
+    if (problemId) {
+      this.sessionSeenIds.add(problemId);
+      this._recordSkippedHistory(problemId);
+    } else {
+      this.saveToLocalStorage();
+    }
 
-    const nextProblem = this.getNextFlowProblem('flow');
+    const nextProblem = this.getNextFlowProblem(activeMode || 'flow', { excludeId: problemId });
     return {
       status: 'skipped',
       reason,
@@ -969,17 +1155,22 @@ class FlowStoreClass {
 
   /**
    * Records a problem surrender / give-up: resets streak, recalibrates rating honestly,
-   * tags problem for spaced repetition review, and primes next flow problem.
+   * tags problem for spaced repetition review, and primes next problem.
    */
-  recordGiveUp(problemId, elapsedSeconds = 0) {
+  recordGiveUp(problemId, elapsedSeconds = 0, activeMode = 'flow') {
     const problem = this.getProblem(problemId) || { id: problemId, clipped_difficulty: 1200 };
     const currentTr = this.userState.training_rating || 1200;
-    const delta = -20;
-    const newTr = Math.max(400, Math.min(3200, currentTr + delta));
+    const delta = -15;
+    const newTr = Math.max(100, Math.min(3600, currentTr + delta));
 
     this.userState.training_rating = newTr;
     this.userState.streak = 0;
     this.userState.multiplier = 1.0;
+
+    if (problemId) {
+      this.sessionSeenIds.add(problemId);
+      this._recordSkippedHistory(problemId);
+    }
 
     // Track in review list for spaced repetition
     if (!Array.isArray(this.userState.review_list)) {
@@ -1011,7 +1202,7 @@ class FlowStoreClass {
 
     this.saveToLocalStorage();
 
-    const nextProblem = this.getNextFlowProblem('flow');
+    const nextProblem = this.getNextFlowProblem(activeMode || 'flow', { excludeId: problemId });
     return {
       status: 'given_up',
       reason: 'surrendered',
