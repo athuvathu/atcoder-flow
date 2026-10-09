@@ -238,12 +238,16 @@ export class ZenFlowHUD {
     }, 1000);
   }
 
-  destroy() {
-    this.stopVerifyPoller();
+  stopTimer() {
     if (this.timerInterval) {
       clearInterval(this.timerInterval);
       this.timerInterval = null;
     }
+  }
+
+  destroy() {
+    this.stopVerifyPoller();
+    this.stopTimer();
   }
 
   /**
