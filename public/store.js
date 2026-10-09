@@ -853,35 +853,42 @@ class FlowStoreClass {
       }
     }
 
+    const streak = Math.max(0, Number(this.userState.streak) || 0);
+    // In Flow mode, consecutive ACs apply progressive overload (+20 per streak up to +100)
+    const momentumPush = mode === 'flow' ? Math.min(100, streak * 20) : 0;
     const tr = Math.max(200, Math.min(3400, rawTr + diffOffset));
+    const effectiveFlowTr = Math.max(200, Math.min(3400, tr + momentumPush));
 
-    let minDiff, maxDiff;
+    let minDiff, maxDiff, targetDiff;
     switch (mode) {
       case 'warmup':
         minDiff = Math.max(100, tr - 250);
-        maxDiff = Math.max(250, tr - 50);
+        maxDiff = Math.max(250, tr - 60);
+        targetDiff = Math.round((minDiff + maxDiff) / 2);
         break;
       case 'speed':
         minDiff = Math.max(100, tr - 200);
-        maxDiff = Math.max(250, tr - 40);
+        maxDiff = Math.max(250, tr - 50);
+        targetDiff = Math.round((minDiff + maxDiff) / 2);
         break;
       case 'reach':
-        minDiff = tr + 80;
-        maxDiff = tr + 240;
+        minDiff = tr + 100;
+        maxDiff = tr + 260;
+        targetDiff = tr + 175;
         break;
       case 'boss':
-        minDiff = tr + 140;
-        maxDiff = tr + 340;
+        minDiff = tr + 180;
+        maxDiff = tr + 380;
+        targetDiff = tr + 260;
         break;
       case 'flow':
       default:
-        minDiff = Math.max(100, tr - 80);
-        maxDiff = tr + 100;
+        // Zone of Proximal Development (ZPD): biased slightly above comfort zone (+50) + streak momentum
+        minDiff = Math.max(100, effectiveFlowTr - 25);
+        maxDiff = effectiveFlowTr + 150;
+        targetDiff = effectiveFlowTr + 50;
         break;
     }
-
-    // Target difficulty centered cleanly inside the requested mode's bracket (fixes old 2*tr double-add bug!)
-    const targetDiff = mode === 'flow' ? tr : Math.round((minDiff + maxDiff) / 2);
 
     const isGoldenEra = (contestId) => {
       const c = (contestId || '').toLowerCase();
@@ -969,15 +976,15 @@ class FlowStoreClass {
       : candidates;
     const pool = diffContestPool.length > 0 ? diffContestPool : candidates;
 
-    // Sort by closeness to targetDiff, then sample uniformly from a wide pool (up to 30 candidates)
-    // so skipping ALWAYS gives fresh variety within your exact difficulty bracket.
+    // Sort by closeness to targetDiff, then sample uniformly from a wide pool (up to 25 candidates)
+    // so skipping ALWAYS gives fresh variety within your exact growth bracket.
     pool.sort((a, b) => {
       const distA = Math.abs((a.clipped_difficulty || 1200) - targetDiff);
       const distB = Math.abs((b.clipped_difficulty || 1200) - targetDiff);
       return distA - distB;
     });
 
-    const sampleSize = Math.min(30, pool.length);
+    const sampleSize = Math.min(25, pool.length);
     const chosen = pool[Math.floor(Math.random() * sampleSize)];
 
     this.sessionSeenIds.add(chosen.id);
@@ -1001,52 +1008,73 @@ class FlowStoreClass {
   }
 
   /**
-   * Records AC solve, computes Par pacing bonuses, steady Elo rating progression,
-   * Up-Solve Redemption graduation from review_list, and solve_log telemetry.
+   * Realistic Contest Reference Pace (in seconds) anchored to problem difficulty:
+   * - Diff 600: 10m (600s)
+   * - Diff 800: 15m (900s)
+   * - Diff 1000: 20m (1200s)
+   * - Diff 1200: 25m (1500s)
+   * - Diff 1600: 35m (2100s)
+   * - Diff 2000+: 45m (2700s)
+   */
+  computeParSeconds(baseDiff = 1200) {
+    return Math.min(2700, Math.max(600, Math.round(900 + (baseDiff - 800) * 1.5)));
+  }
+
+  /**
+   * Records AC solve using Deliberate Practice / IRT Elo math:
+   * 1. Capability is evaluated against PROBLEM DIFFICULTY, never by punishing deep thinking time.
+   * 2. Easy problems (>200 below rating) give 0 TR gain so speed-grinding easy tasks cannot inflate rating.
+   * 3. Solving at or above rating uses K=40..48 so 4-5 solves advance you a full +100 rating tier.
+   * 4. Deep thinking (> parSeconds) STILL earns 100% of the difficulty rating gain and full baseDiff performance.
    */
   recordSolve(problemId, elapsedSeconds, isAttested = true, activeMode = 'flow') {
     const problem = this.getProblem(problemId) || { id: problemId, clipped_difficulty: 1200 };
     const baseDiff = problem.clipped_difficulty || 1200;
+    const currentTr = this.userState.training_rating || 1200;
+    const diffGap = baseDiff - currentTr;
 
-    const parSeconds = Math.min(2100, Math.max(480, Math.round(600 + (baseDiff - 1000) * 1.5)));
+    const parSeconds = this.computeParSeconds(baseDiff);
 
-    // Pacing vs Par: measured speed adjustment anchored to difficulty
-    let speedBonus = 0;
-    if (elapsedSeconds <= parSeconds) {
-      speedBonus = Math.round(((parSeconds - elapsedSeconds) / parSeconds) * 75);
-    } else {
-      speedBonus = Math.max(-120, Math.round(((parSeconds - elapsedSeconds) / parSeconds) * 80));
-    }
+    // Bradley-Terry / IRT Expected Solve Probability: E = 1 / (1 + 10^((D - R) / 400))
+    // When D > R (harder problem), E < 0.5 -> solving awards larger (1 - E) gain, giving up costs tiny E loss.
+    const expectedScore = 1 / (1 + Math.pow(10, (baseDiff - currentTr) / 400));
 
     const isCritical = elapsedSeconds <= 0.5 * parSeconds;
-    const speedSurgeBonus = isCritical
-      ? Math.min(25, Math.floor(((0.5 * parSeconds - elapsedSeconds) / (0.5 * parSeconds)) * 25))
-      : 0;
-
     const isClutch = !isCritical && (elapsedSeconds >= 0.85 * parSeconds && elapsedSeconds <= parSeconds);
 
-    // Honest solve performance anchored to problem difficulty
-    const solvePerformance = Math.max(400, Math.round(baseDiff + speedBonus + speedSurgeBonus));
+    // Performance evaluation: NEVER drop solvePerformance below baseDiff when solved unassisted!
+    // Only award a modest contest-pace bonus (+0..+50) if the problem wasn't trivial relative to user rating.
+    let paceBonus = 0;
+    if (elapsedSeconds <= parSeconds) {
+      const maxPaceBonus = diffGap < -100 ? 15 : 50;
+      paceBonus = Math.round(((parSeconds - elapsedSeconds) / parSeconds) * maxPaceBonus);
+    }
+    const speedSurgeBonus = (isCritical && diffGap >= -100)
+      ? Math.min(20, Math.floor(((0.5 * parSeconds - elapsedSeconds) / (0.5 * parSeconds)) * 20))
+      : 0;
+
+    const solvePerformance = Math.max(400, Math.round(baseDiff + paceBonus + speedSurgeBonus));
     const cfPerf = atcoderToCodeforces(solvePerformance);
 
-    // Steady Elo-principled Training Rating progression (no runaway +350 spikes on Attest AC)
-    const currentTr = this.userState.training_rating || 1200;
-    const expectedScore = 1 / (1 + Math.pow(10, (currentTr - baseDiff) / 400));
-    const baseDelta = Math.max(1, Math.round(16 * (1 - expectedScore)));
-
-    let speedDeltaBonus = 0;
-    if (isCritical) {
-      speedDeltaBonus = 4;
-    } else if (elapsedSeconds <= parSeconds) {
-      speedDeltaBonus = 1;
-    } else if (elapsedSeconds > 1.5 * parSeconds) {
-      speedDeltaBonus = -3;
+    // Deliberate Practice Elo Rating Update:
+    // - Far below rating (diffGap < -200): Fluency drill only (0 TR inflation)
+    // - Consolidation zone (-200 <= diffGap < -100): K = 16 (+2 to +6 TR)
+    // - Flow growth zone (-100 <= diffGap < 100): K = 40 (+14 to +26 TR)
+    // - Stretch / Reach / Boss breakthrough (diffGap >= 100): K = 48 (+31 to +44 TR)
+    // - Zero penalty for taking longer than parSeconds (deep unassisted thinking = 100% credit!)
+    let ratingDelta = 0;
+    if (diffGap < -200) {
+      ratingDelta = 0;
+    } else if (diffGap < -100) {
+      ratingDelta = Math.max(2, Math.round(16 * (1 - expectedScore)));
     } else {
-      speedDeltaBonus = -1;
+      const kFactor = diffGap >= 100 ? 48 : 40;
+      const baseDelta = Math.round(kFactor * (1 - expectedScore));
+      const contestPaceBonus = (elapsedSeconds <= parSeconds && diffGap >= -50) ? (isCritical ? 3 : 1) : 0;
+      ratingDelta = Math.max(8, Math.min(45, baseDelta + contestPaceBonus));
     }
 
-    const ratingDelta = Math.max(1, Math.min(24, baseDelta + speedDeltaBonus));
-    const isFrontierLeap = false;
+    const isFrontierLeap = diffGap >= 120;
 
     // Check if this solve graduates a problem from the Spaced Repetition Review Queue
     let wasRedemption = false;
@@ -1058,10 +1086,12 @@ class FlowStoreClass {
       }
     }
 
-    // Update state
+    // Update state: only increment progressive-overload streak on non-trivial problems (diffGap >= -150)
     this.userState.training_rating = Math.max(100, Math.min(3600, Math.round(currentTr + ratingDelta)));
-    this.userState.streak = (this.userState.streak || 0) + 1;
-    this.userState.multiplier = Math.min(4, 1 + Math.floor(this.userState.streak / 5) * 0.25);
+    if (diffGap >= -150) {
+      this.userState.streak = (this.userState.streak || 0) + 1;
+    }
+    this.userState.multiplier = Math.min(4, 1 + Math.floor((this.userState.streak || 0) / 5) * 0.25);
     const xpGained = Math.round((baseDiff / 10) * this.userState.multiplier * (wasRedemption ? 1.5 : 1));
     this.userState.xp = (this.userState.xp || 0) + xpGained;
     this.userState.session_solves = (this.userState.session_solves || 0) + 1;
@@ -1084,7 +1114,7 @@ class FlowStoreClass {
       delta: ratingDelta,
       status: 'ac',
       was_redemption: wasRedemption,
-      is_frontier_leap: false
+      is_frontier_leap: isFrontierLeap
     });
     if (this.userState.solve_log.length > 100) {
       this.userState.solve_log = this.userState.solve_log.slice(-100);
@@ -1130,8 +1160,12 @@ class FlowStoreClass {
   recordSkip(problemId, reason = 'neutral', activeMode = 'flow') {
     const currentTr = this.userState.training_rating || 1200;
     let delta = 0;
-    if (reason === 'too_hard') delta = -20;
-    else if (reason === 'too_easy') delta = +20;
+    if (reason === 'too_hard') {
+      delta = -25;
+      this.userState.streak = 0;
+    } else if (reason === 'too_easy') {
+      delta = +25;
+    }
 
     const newTr = Math.max(100, Math.min(3600, currentTr + delta));
     this.userState.training_rating = newTr;
@@ -1154,13 +1188,17 @@ class FlowStoreClass {
   }
 
   /**
-   * Records a problem surrender / give-up: resets streak, recalibrates rating honestly,
-   * tags problem for spaced repetition review, and primes next problem.
+   * Records a problem surrender / give-up using Elo-weighted expectation:
+   * - Surrendering a hard stretch/Boss problem (low E) only costs -3..-6 TR so you aren't punished for trying hard tasks.
+   * - Surrendering an equal problem (E = 0.5) costs -12 TR and resets streak momentum.
+   * - Surrendering an easier problem (high E) costs -16..-20 TR to quickly recalibrate if rating was set too high.
    */
   recordGiveUp(problemId, elapsedSeconds = 0, activeMode = 'flow') {
     const problem = this.getProblem(problemId) || { id: problemId, clipped_difficulty: 1200 };
+    const baseDiff = problem.clipped_difficulty || 1200;
     const currentTr = this.userState.training_rating || 1200;
-    const delta = -15;
+    const expectedScore = 1 / (1 + Math.pow(10, (baseDiff - currentTr) / 400));
+    const delta = -Math.max(3, Math.min(20, Math.round(24 * expectedScore)));
     const newTr = Math.max(100, Math.min(3600, currentTr + delta));
 
     this.userState.training_rating = newTr;
@@ -1186,7 +1224,7 @@ class FlowStoreClass {
     this.userState.solve_log.push({
       id: problemId,
       title: problem.title || problemId,
-      diff: problem.clipped_difficulty || 1200,
+      diff: baseDiff,
       domain: classifyProblemDomain(problem),
       ts: Date.now(),
       elapsed: elapsedSeconds,

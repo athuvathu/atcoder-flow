@@ -140,9 +140,9 @@ export class ZenFlowHUD {
     const existingNotes = localStorage.getItem(`atcoder_notes_${this.currentProblem.id}`);
     this.isNotesOpen = Boolean(existingNotes && existingNotes.trim().length > 0);
 
-    // Calibrate Par time
+    // Calibrate realistic Contest Reference Pace
     const diff = this.currentProblem.clipped_difficulty || 1200;
-    this.parSeconds = Math.min(2100, Math.max(480, Math.round(600 + (diff - 1000) * 1.5)));
+    this.parSeconds = flowStore.computeParSeconds ? flowStore.computeParSeconds(diff) : Math.min(2700, Math.max(600, Math.round(900 + (diff - 800) * 1.5)));
 
     // Fetch user live training rating and streak
     const user = flowStore.getUserState();
@@ -287,10 +287,10 @@ export class ZenFlowHUD {
 
     if (paceEl) {
       if (delta >= 0) {
-        paceEl.textContent = `+${this.formatTime(delta)} AHEAD`;
+        paceEl.textContent = `+${this.formatTime(delta)} CONTEST PACE`;
         paceEl.className = 'par-badge par-ahead';
       } else {
-        paceEl.textContent = `-${this.formatTime(-delta)} OVER PAR`;
+        paceEl.textContent = `DEEP THINK (+${this.formatTime(-delta)} · 100% CREDIT)`;
         paceEl.className = 'par-badge par-behind';
       }
     }
@@ -1019,18 +1019,20 @@ export class ZenFlowHUD {
 
     const beatPar = data.beat_par;
     const parDiffText = beatPar
-      ? `BEAT PAR BY ${this.formatTime(data.par_diff_seconds)}`
-      : `MISSED PAR BY ${this.formatTime(-data.par_diff_seconds)}`;
+      ? `CONTEST PACE (-${this.formatTime(data.par_diff_seconds)})`
+      : `DEEP SOLVE (+${this.formatTime(-data.par_diff_seconds)} · 100% CREDIT)`;
 
     const cfPerf = atcoderToCodeforces(data.solve_performance);
     const cfTr = atcoderToCodeforces(data.training_rating);
     const atTr = getAtcoderMeta(data.training_rating);
     const waifuEnabled = flowStore.isWaifuModeEnabled();
 
-    const surgeBannerHtml = data.is_critical 
+    const surgeBannerHtml = data.is_frontier_leap
+      ? `<div class="surge-badge critical">[ ★ FRONTIER BREAKTHROUGH: +${data.rating_delta} TR LEAP ]</div>`
+      : data.is_critical && data.speed_surge_bonus > 0
       ? `<div class="surge-badge critical">[ CRITICAL SPEED SURGE: +${data.speed_surge_bonus} BONUS ]</div>`
       : data.is_clutch 
-      ? `<div class="surge-badge clutch">[ CLUTCH AC: PAR WINDOW LOCKED ]</div>`
+      ? `<div class="surge-badge clutch">[ CLUTCH AC: CONTEST PACE LOCKED ]</div>`
       : '';
 
     const redemptionBannerHtml = data.was_redemption
@@ -1392,6 +1394,9 @@ export class ZenFlowHUD {
     this.stopTimer();
 
     const prob = this.currentProblem || {};
+    const probDiff = prob.clipped_difficulty || 1200;
+    const expectedGiveup = 1 / (1 + Math.pow(10, (probDiff - (this.trainingRating || 1200)) / 400));
+    const estGiveupDelta = -Math.max(3, Math.min(20, Math.round(24 * expectedGiveup)));
     const editorialUrl = prob.editorial_url || `https://atcoder.jp/contests/${prob.contest_id}/editorial`;
     const isGauntlet = Boolean(this.gauntletState && this.gauntletState.active);
     const reflectionTags = [
@@ -1426,7 +1431,7 @@ export class ZenFlowHUD {
         <div class="giveup-impact-box">
           <div class="giveup-impact-row">
             <span>RATING ADJUSTMENT:</span>
-            <strong class="delta-neg">-15 TR</strong>
+            <strong class="delta-neg">${estGiveupDelta} TR</strong>
           </div>
           <div class="giveup-impact-row">
             <span>SESSION STREAK:</span>
@@ -1523,7 +1528,7 @@ export class ZenFlowHUD {
         return;
       }
 
-      this.showToast(`Gave up on problem. TR: ${data.new_tr} (-15). Loading next challenge...`, 'info');
+      this.showToast(`Gave up on problem. TR: ${data.new_tr} (${data.delta}). Loading next challenge...`, 'info');
 
       if (data.primed_problem) {
         this.loadProblem(data.primed_problem);
