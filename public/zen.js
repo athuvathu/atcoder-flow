@@ -852,6 +852,15 @@ export class ZenFlowHUD {
       const existingBar = this.container.querySelector('.attest-prompt-bar');
       if (existingBar) existingBar.remove();
 
+      this.stopTimer();
+      this.stopVerifyPoller();
+
+      if (solveBtn) {
+        solveBtn.disabled = false;
+        solveBtn.textContent = '✓ [v] VERIFY AC';
+        solveBtn.classList.remove('btn-attest-pulse');
+      }
+
       // ===== JACKPOT: Verified or Attested AC =====
       const data = flowStore.recordSolve(this.currentProblem.id, this.elapsedSeconds, optimistic, this.activeMode || 'flow');
 
@@ -862,6 +871,11 @@ export class ZenFlowHUD {
 
       // Clear active problem in localStorage
       localStorage.removeItem('atcoder_flow_zen_state');
+
+      // Refresh parent HUD (rating, solved count, table checkmarks, dock) even when Waifu mode is OFF
+      if (typeof this.onSolveAC === 'function') {
+        this.onSolveAC(data);
+      }
 
       // Trigger multi-stage euphoric feedback
       this.showJackpotCelebration(data);

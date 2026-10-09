@@ -1361,19 +1361,21 @@ class FlowStoreClass {
 
   /**
    * Directly syncs accepted submissions from Kenkoooo API.
-   * Queries both baseline history and a fresh 30-day rolling window (with jitter to bypass
-   * CloudFront edge caching and Kenkoooo's 500-submission ascending pagination cap).
+   * Uses a randomized early epoch (1..997) to guarantee a CloudFront cache miss ('Miss from cloudfront')
+   * and fetch full history, plus a recent window if the user exceeds Kenkoooo's 500-submission page cap.
    */
   async syncKenkoooo() {
     const handle = (this.userState.handle || 'atrv').trim();
     const nowSec = Math.floor(Date.now() / 1000);
-    // Unique from_second bypasses CloudFront 'Hit from cloudfront' stale cache
-    const recentFrom = Math.max(0, nowSec - 86400 * 30 - (nowSec % 97) - Math.floor(Math.random() * 53));
+    const baseJitter = Math.floor(Math.random() * 997) + 1;
 
-    const [recentSubs, baseSubs] = await Promise.all([
-      this._fetchKenkooooSubmissions(handle, recentFrom),
-      this._fetchKenkooooSubmissions(handle, 0).catch(() => [])
-    ]);
+    const baseSubs = await this._fetchKenkooooSubmissions(handle, baseJitter);
+    let recentSubs = [];
+    if (baseSubs.length >= 500) {
+      const lastEpoch = baseSubs[baseSubs.length - 1]?.epoch_second || (nowSec - 86400 * 30);
+      const tailFrom = Math.max(1, lastEpoch - Math.floor(Math.random() * 120));
+      recentSubs = await this._fetchKenkooooSubmissions(handle, tailFrom).catch(() => []);
+    }
 
     const merged = [...baseSubs, ...recentSubs];
     const newAc = [];
@@ -1398,19 +1400,26 @@ class FlowStoreClass {
   }
 
   /**
-   * Live-verifies a specific problem's AC status on Kenkoooo with cache-busted recent window
+   * Live-verifies a specific problem's AC status on Kenkoooo with guaranteed CloudFront cache-busting
    * and returns rich diagnostic metadata (latest verdict, crawler lag status, handle).
    */
   async verifyProblemAC(problemId) {
     const handle = (this.userState.handle || 'atrv').trim();
     const nowSec = Math.floor(Date.now() / 1000);
-    // Query last 14 days with random second offset so CloudFront MUST miss cache and hit origin
-    const recentFrom = Math.max(0, nowSec - 86400 * 14 - Math.floor(Math.random() * 180));
+    // Randomized from_second (1..997) forces CloudFront 'Miss from cloudfront' and returns all submissions up to 500
+    const baseJitter = Math.floor(Math.random() * 997) + 1;
+    const baseSubs = await this._fetchKenkooooSubmissions(handle, baseJitter);
 
-    const recentSubs = await this._fetchKenkooooSubmissions(handle, recentFrom);
+    let allSubs = baseSubs;
+    if (baseSubs.length >= 500) {
+      const lastEpoch = baseSubs[baseSubs.length - 1]?.epoch_second || (nowSec - 86400 * 14);
+      const tailFrom = Math.max(1, lastEpoch - Math.floor(Math.random() * 180));
+      const tailSubs = await this._fetchKenkooooSubmissions(handle, tailFrom).catch(() => []);
+      allSubs = [...baseSubs, ...tailSubs];
+    }
 
     const newAc = [];
-    for (const sub of recentSubs) {
+    for (const sub of allSubs) {
       if (sub && sub.result === 'AC' && sub.problem_id) {
         if (!this.solvedSet.has(sub.problem_id)) {
           this.solvedSet.add(sub.problem_id);
@@ -1422,7 +1431,7 @@ class FlowStoreClass {
       this.saveToLocalStorage();
     }
 
-    const problemSubs = recentSubs
+    const problemSubs = allSubs
       .filter(s => s && s.problem_id === problemId)
       .sort((a, b) => (b.epoch_second || 0) - (a.epoch_second || 0));
 
@@ -1436,8 +1445,8 @@ class FlowStoreClass {
     }
 
     const latestSub = problemSubs[0] || null;
-    const latestOverallSub = recentSubs.length > 0
-      ? [...recentSubs].sort((a, b) => (b.epoch_second || 0) - (a.epoch_second || 0))[0]
+    const latestOverallSub = allSubs.length > 0
+      ? [...allSubs].sort((a, b) => (b.epoch_second || 0) - (a.epoch_second || 0))[0]
       : null;
 
     return {
